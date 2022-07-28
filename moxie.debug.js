@@ -10346,12 +10346,11 @@ var OneLinkMoxieJS = (function() {
 // globals
 //-----------------------------------------------------------------------------
 
-var g_MoxieVersion          = "2.10.10"; // <-- Update version number for every change
+var g_MoxieVersion          = "2.12.13"; // <-- Update version number for every change
+var g_XAPISToken            = null;
+var g_XAPISTokenDate        = null;  // Date token last refreshed 
+var g_XAPISTokenInterval    = 60000 * 15; // 15 minutes interval to get new token
 var g_iDebugLevel           = 0;
-var g_QAStats               = {
-	"parse_dom_usecs"  : 0,
-	"apply_trans_secs" : 0
-	};
 var g_bIsOPE                = false;
 var g_bIsGLNOW              = false;
 var g_sSkeletonVersion      = "1";
@@ -10379,6 +10378,7 @@ var g_TranslationArray      = null;
 var g_AssetTranslationArray = null;
 var g_TargetCache           = {};
 var g_bEnableAMI            = true;
+var g_bForceAMI             = false;
 var g_ApiStats              = [];
 var g_MoxieObserver         = null;
 var g_IntersectObserver     = null;
@@ -10390,6 +10390,7 @@ var g_MoxieAssetObserver    = null;
 var g_sMoxieLocation        = document.location.pathname + document.location.search;
 var g_bInitDelayDone        = false;
 var g_RulesInlineTags       = [];
+var g_RemoveHTMLTags        = [];
 var g_bKeepActiveElement    = true;
 var g_RulesBlockTags        = [];
 var g_LangSelectorTICs      = [];
@@ -10403,6 +10404,7 @@ var g_ImageTranslateTICs    = [];
 var g_PseudoNoTranslateTICs = [];
 var g_PseudoTranslateTICs   = [];
 var g_SuppressMtTICs        = [];
+var g_AutoDetectTICs        = [];
 var g_DefaultAttrs          = ["title", "alt", "placeholder", "aria-label", "aria-roledescription", "aria-placeholder", "aria-valuetext"];
 var g_TranslateAttrs        = [
 		{
@@ -10461,8 +10463,10 @@ let g_DateTime2Pattern = /^(?:\d+:+\d+:*\d*:*\d*(?:[ \t]*a\.?m\.?|[ \t]*p\.?m\.?
 //   10:14 A.M. July 12, 1956
 //   Aug 2, 89
 //   august 1, 1989
-let g_DateTime3Regex   = /((?:\d+:+\d+:*\d*:*\d*[ \t]*(?:a\.?m\.?|p\.?m\.?)*[ \t]*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+[ \t]*)?(?:January|Jan|February|Feb|March|Mar|April|Apr|May|June|Jun|July|Jul|August|Aug|September|Sept|Sep|October|Oct|November|Nov|December|Dec)[ \t]+\d{1,2}(?:st|nd|rd|th)?(?:[ \t,]+(?:\d{4}|\d{2}))?(?:[ \tT]+(?:\d+:+\d*:*\d*:*\d*(?:[ \t]*a\.?m\.?|[ \t]*p\.?m\.?)*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+)+)*)(?=\s|$|\.|\,|\!|\?|\()/gi;
-let g_DateTime3Pattern = /^(?:\d+:+\d+:*\d*:*\d*[ \t]*(?:a\.?m\.?|p\.?m\.?)*[ \t]*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+[ \t]*)?(?:January|Jan|February|Feb|March|Mar|April|Apr|May|June|Jun|July|Jul|August|Aug|September|Sept|Sep|October|Oct|November|Nov|December|Dec)[ \t]+\d{1,2}(?:st|nd|rd|th)?(?:[ \t,]+(?:\d{4}|\d{2}))?(?:[ \tT]+(?:\d+:+\d*:*\d*:*\d*(?:[ \t]*a\.?m\.?|[ \t]*p\.?m\.?)*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+)+)*$/i;
+//   May 13
+//   May 2022
+let g_DateTime3Regex   = /((?:\d+:+\d+:*\d*:*\d*[ \t]*(?:a\.?m\.?|p\.?m\.?)*[ \t]*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+[ \t]*)?(?:January|Jan|February|Feb|March|Mar|April|Apr|May|June|Jun|July|Jul|August|Aug|September|Sept|Sep|October|Oct|November|Nov|December|Dec)[ \t]+(?:\d{1,2}(?:st|nd|rd|th)?(?:[ \t,]+(?:\d{4}|\d{2}))?|\d{4})(?:[ \tT]+(?:\d+:+\d*:*\d*:*\d*(?:[ \t]*a\.?m\.?|[ \t]*p\.?m\.?)*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+)+)*)(?=\s|$|\.|\,|\!|\?|\()/gi;
+let g_DateTime3Pattern = /^(?:\d+:+\d+:*\d*:*\d*[ \t]*(?:a\.?m\.?|p\.?m\.?)*[ \t]*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+[ \t]*)?(?:January|Jan|February|Feb|March|Mar|April|Apr|May|June|Jun|July|Jul|August|Aug|September|Sept|Sep|October|Oct|November|Nov|December|Dec)[ \t]+(?:\d{1,2}(?:st|nd|rd|th)?(?:[ \t,]+(?:\d{4}|\d{2}))?|\d{4})(?:[ \tT]+(?:\d+:+\d*:*\d*:*\d*(?:[ \t]*a\.?m\.?|[ \t]*p\.?m\.?)*|\d+[ \t]*(?:a\.?m\.?|p\.?m\.?)+)+)*$/i;
 
 // TIME ZONES
 //   1300 GMT
@@ -10494,23 +10498,31 @@ var g_XDomTokenizePatterns = [];
 var g_PosLookBehindCheck = /\(\?\<[=!]/;
 var g_TokenizeCookies      = [];
 var g_bTranslateInProgress = false;
+var g_bAutoTransInProgress = false;
+var g_bPretransInProgress  = false;
 var g_TranslateObjQueue    = [];
 var g_LocationArray        = [];
+var g_DomObjsArray         = [];
+var g_AutoDetLocationArray = [];
+var g_AutoDetDomObjsArray  = [];
 var g_PseudoObjMapping     = {};
 var g_PseudoTransMapping   = {};
 var g_PseudoObjCount       = 0;
-var g_DomObjsArray         = [];
 var g_AssetRewrites        = [];
 var g_bHideDynamicContent  = false;
 var g_sDeploymentMethod    = ""; // domain, folder, query or cookie
 var g_sDeploymentName      = ""; // lang
 var g_DeploymentValues     = {}; // {"en":"English","es":"Español","fr":"Français"}
 var g_sTxMethod            = "";
+var g_sPretranslateMode    = "all";
+var g_sCustomCss           = "";
+var g_sCustomJs            = "";
 var g_TxRequest            = {
 		"text"    : [],
 		"assets"  : []
 	};
 var g_TxNoStacks           = [];
+var g_TxAutoDetect         = [];
 var g_MigrateTxRequest     = {
 		"text"    : []
 	};
@@ -10538,13 +10550,14 @@ var g_GlobalStats          = {
 	};
 
 // determine if lookbehind regex is supported on this browser
-let g_bSupportLookbehind = !IsIEOrSafari();
+let g_bSupportLookbehind = DoesBrowserSupportLookbehind();
 
 // Use a map to hold onto caches of queried elements & clear on mutations.
 let g_oQueryCache = new Map();
 
 let g_bThrottleDynamicContent = false;
 let g_nThrottleDelayMsecs = 50;
+
 
 //-----------------------------------------------------------------------------
 function MoxieDebounce(func, wait, immediate) 
@@ -10579,15 +10592,24 @@ function DebugLog (iLevel, sText, obj1, obj2)
 } // DebugLog
 
 //-----------------------------------------------------------------------------
-function IsIEOrSafari() {
+function DoesBrowserSupportLookbehind()
 //-----------------------------------------------------------------------------
-	var ua = window.navigator.userAgent;
-	return (
-		ua.indexOf("MSIE") !== -1 ||
-		ua.indexOf("Trident/") !== -1 ||
-		(ua.indexOf("Safari") !== -1 && ua.indexOf("Chrome") === -1)
-	);
-} // IsIEOrSafari
+{
+	try
+	{
+		var f = new Function(`return (
+			"hibyehihi"
+				.replace(new RegExp("(?<=hi)hi", "g"), "hello")
+				.replace(new RegExp("hi(?!bye)", "g"), "hey") === "hibyeheyhello"
+		);
+		`)
+		return f();
+	}
+	catch (error)
+	{
+		return false;
+	}
+} // DoesBrowserSupportLookbehind
 
 //-----------------------------------------------------------------------------
 function FNV1aHash (sText)
@@ -10744,8 +10766,8 @@ function MoxieNormalizeNodeValue(obj)
 	let bIsWhiteSpacePre    = false;
 	let bCollapseWhitespace = false;
 
-	let oParent = obj.parentNode;
-	if (oParent != null && oParent.nodeType === 1)
+	let oParent = obj.assignedSlot || obj.parentNode || obj.host;
+	if (oParent && (oParent.nodeType === 1))
 	{
 		let oStyle = (window.getComputedStyle) ? window.getComputedStyle(oParent) : oParent.currentStyle;
 		const sWhitespace = oStyle.whiteSpace;
@@ -10782,7 +10804,7 @@ function MoxieNormalizeNodeValue(obj)
 } // MoxieNormalizeNodeValue
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizeNumbers (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizeNumbers (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 	let sPartialString = "";
@@ -10814,7 +10836,7 @@ function MoxieTokenizeNumbers (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 							// Before creating the ph token below,
 							// create text or ph for the string parts that were not tokenized
 							let iTransIndex = g_TranslatedText.indexOf(sPartialString);
-							if (iTransIndex !== -1)
+							if (!bAutoDetect && (iTransIndex !== -1))
 							{
 								// This is translated text. Don't send this.
 
@@ -10935,7 +10957,7 @@ function MoxieTokenizeNumbers (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 	if (sPartialString != "")
 	{
 		let iTransIndex = g_TranslatedText.indexOf(sPartialString);
-		if (iTransIndex !== -1)
+		if (!bAutoDetect && (iTransIndex !== -1))
 		{
 			// This is translated text. Don't send this.
 
@@ -10987,14 +11009,14 @@ function MoxieTokenizeNumbers (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 } // MoxieTokenizeNumbers
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizeTime (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizeTime (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 
 	if (MatchNoTokenizeTIC(sTagStack, sIdStack, sClassStack, obj, "time" )) 
 	{
 		//skip to numbers tokenization
-		return MoxieTokenizeNumbers(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+		return MoxieTokenizeNumbers(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 	}
 
 	let bHasText = false;
@@ -11068,7 +11090,7 @@ function MoxieTokenizeTime (sText, DomObjs, TextForHash, JliffArray, MigrateJlif
 			{
 				if (g_bTokenizeNumbers)
 				{
-					if (MoxieTokenizeNumbers(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+					if (MoxieTokenizeNumbers(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 					{
 						bHasText = true;
 					}
@@ -11076,7 +11098,7 @@ function MoxieTokenizeTime (sText, DomObjs, TextForHash, JliffArray, MigrateJlif
 				else
 				{
 					let iTransIndex = g_TranslatedText.indexOf(sVal);
-					if (iTransIndex !== -1)
+					if (!bAutoDetect && (iTransIndex !== -1))
 					{
 						// This is translated text. Don't send this.
 
@@ -11126,14 +11148,14 @@ function MoxieTokenizeTime (sText, DomObjs, TextForHash, JliffArray, MigrateJlif
 } // MoxieTokenizeTime
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizeTimeZone (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizeTimeZone (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 
 	if (MatchNoTokenizeTIC(sTagStack, sIdStack, sClassStack, obj, "timezones" )) 
 	{
 		//skip to time tokenization
-		return MoxieTokenizeTime(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+		return MoxieTokenizeTime(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 	}
 
 	let bHasText = false;
@@ -11204,7 +11226,7 @@ function MoxieTokenizeTimeZone (sText, DomObjs, TextForHash, JliffArray, Migrate
 				JliffArray.push(sourceItem);
 			} else
 			{
-				if (MoxieTokenizeTime (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+				if (MoxieTokenizeTime (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 				{
 					bHasText = true;
 				}
@@ -11217,7 +11239,7 @@ function MoxieTokenizeTimeZone (sText, DomObjs, TextForHash, JliffArray, Migrate
 } // MoxieTokenizeTimeZone
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizeDateTime3 (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizeDateTime3 (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 	let bHasText = false;
@@ -11288,7 +11310,7 @@ function MoxieTokenizeDateTime3 (sText, DomObjs, TextForHash, JliffArray, Migrat
 				JliffArray.push(sourceItem);
 			} else
 			{
-				if (MoxieTokenizeTimeZone (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount,sTagStack, sIdStack, sClassStack, obj ))
+				if (MoxieTokenizeTimeZone (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount,sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 					{
 					bHasText = true;
 				}
@@ -11301,7 +11323,7 @@ function MoxieTokenizeDateTime3 (sText, DomObjs, TextForHash, JliffArray, Migrat
 } // MoxieTokenizeDateTime3
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizeDateTime2 (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizeDateTime2 (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 	let bHasText = false;
@@ -11372,7 +11394,7 @@ function MoxieTokenizeDateTime2 (sText, DomObjs, TextForHash, JliffArray, Migrat
 				JliffArray.push(sourceItem);
 			} else
 			{
-				if (MoxieTokenizeDateTime3 (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+				if (MoxieTokenizeDateTime3 (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 				{
 					bHasText = true;
 				}
@@ -11385,13 +11407,13 @@ function MoxieTokenizeDateTime2 (sText, DomObjs, TextForHash, JliffArray, Migrat
 } // MoxieTokenizeDateTime2
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizeDateTime (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizeDateTime (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 	if (MatchNoTokenizeTIC(sTagStack, sIdStack, sClassStack, obj, "dates" )) 
 	{
 		//skip to timezone tokenization
-		return MoxieTokenizeTimeZone(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+		return MoxieTokenizeTimeZone(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 	}
 
 	let bHasText = false;
@@ -11462,7 +11484,7 @@ function MoxieTokenizeDateTime (sText, DomObjs, TextForHash, JliffArray, Migrate
 				JliffArray.push(sourceItem);
 			} else
 			{
-				if (MoxieTokenizeDateTime2 (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+				if (MoxieTokenizeDateTime2 (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 				{
 					bHasText = true;
 				}
@@ -11535,7 +11557,7 @@ function MoxieRegExpMatches(patterns, str, flags)
 } // MoxieRegExpMatches
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 	let bHasText = false;
@@ -11581,7 +11603,7 @@ function MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 				if (RegexResult.index > iCurrentIdx)
 				{
 					let sVal = sText.substring(iCurrentIdx, RegexResult.index);
-					if (MoxieTokenizeDateTime(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+					if (MoxieTokenizeDateTime(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 					{
 						bHasText = true;
 					}
@@ -11633,7 +11655,7 @@ function MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 			if (iCurrentIdx < sText.length)
 			{
 				let sVal = sText.substring(iCurrentIdx);
-				if (MoxieTokenizeDateTime(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+				if (MoxieTokenizeDateTime(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 				{
 					bHasText = true;
 				}
@@ -11645,7 +11667,7 @@ function MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 	}
 	else
 	{
-		if (MoxieTokenizeDateTime(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+		if (MoxieTokenizeDateTime(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 		{
 			bHasText = true;
 		}
@@ -11656,14 +11678,13 @@ function MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 } // MoxieTokenizePattern
 
 //-----------------------------------------------------------------------------
-function MoxieTokenizeCookies (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+function MoxieTokenizeCookies (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
-
 	if (MatchNoTokenizeTIC(sTagStack, sIdStack, sClassStack, obj, "custom" )) 
 	{
 		//skip to datetime tokenization
-		return MoxieTokenizeDateTime(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+		return MoxieTokenizeDateTime(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 	}
 
 	let bHasText = false;
@@ -11793,7 +11814,7 @@ function MoxieTokenizeCookies (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 					bHasText = true;
 				} else
 				{
-					if (MoxieTokenizePattern (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+					if (MoxieTokenizePattern (sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 					{
 						bHasText = true;
 					}
@@ -11803,7 +11824,7 @@ function MoxieTokenizeCookies (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 	}
 	else
 	{
-		if (MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+		if (MoxieTokenizePattern (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 		{
 			bHasText = true;
 		}
@@ -11814,12 +11835,46 @@ function MoxieTokenizeCookies (sText, DomObjs, TextForHash, JliffArray, MigrateJ
 } // MoxieTokenizeCookies
 
 //-----------------------------------------------------------------------------
-function MoxieTokenize (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, oTokenContext)
+function TextToJliff (sText, Results, PhMapping, sTagStack, sIdStack, sClassStack)
+//-----------------------------------------------------------------------------
+{
+	// PhMapping is AKA DomObjs
+
+	let TextForHash       = {"value":""};
+	let JliffArray        = [];
+	let MigrateJliffArray = [];
+	let TagCount          = {"value":0};
+	let MigrateTagCount   = {"value":0};
+
+	let obj = null; // There is no DOM object, only text
+
+	let bAutoDetect = MatchAutoDetectTIC(sTagStack, sIdStack, sClassStack, obj);
+
+	let bHadText = MoxieTokenizeCookies (sText, PhMapping, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, bAutoDetect);
+
+	let sTextHash = "";
+	if (bHadText)
+	{
+		sTextHash = FNV1aHash(TextForHash.value);
+	}
+
+	Results.push ({
+		"source" : JliffArray,
+		"block_hash" : sTextHash,
+		"suppress_mt": false
+	});
+
+	// return true/false whether there was any translatable text
+	return bHadText;
+} // TextToJliff
+
+//-----------------------------------------------------------------------------
+function MoxieTokenize (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect, oTokenContext)
 //-----------------------------------------------------------------------------
 {
 	if (!oTokenContext || !oTokenContext.matches.length)
 	{
-		return MoxieTokenizeCookies(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj)
+		return MoxieTokenizeCookies(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect)
 	}
 
 	let match = null;
@@ -11846,7 +11901,7 @@ function MoxieTokenize (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArr
 				// tokenize the rest of the child node text and return
 				oTokenContext.iCurrentIdx = iBlockEndIdx + 1;
 				let sVal = sText.substring(iLocalCurrent);
-				return MoxieTokenizeCookies(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+				return MoxieTokenizeCookies(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 			}
 
 			let iLocalMatchStart = match.start - iOriginalStart;
@@ -11856,7 +11911,7 @@ function MoxieTokenize (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArr
 			{
 				// there is a non match substring to be processed before match
 				let sVal = sText.substring(iLocalCurrent, iLocalMatchStart);
-				if (MoxieTokenizeCookies(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+				if (MoxieTokenizeCookies(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 				{
 					bHasText = true;
 				}
@@ -11917,7 +11972,7 @@ function MoxieTokenize (sText, DomObjs, TextForHash, JliffArray, MigrateJliffArr
 		if (iLocalCurrent < sText.length - 1)
 		{
 			let sVal = sText.substring(iLocalCurrent);
-			if (MoxieTokenizeCookies(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+			if (MoxieTokenizeCookies(sVal, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 			{
 				bHasText = true;
 			}
@@ -12057,7 +12112,7 @@ function MoxieGetIFrameDoc(obj)
 } // MoxieGetIFrameDoc
 
 //-----------------------------------------------------------------------------
-function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext)
+function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 	let bHasText = false;
@@ -12118,10 +12173,11 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 					(sTagStack.indexOf("OPE-HOOK") == -1) &&
 					(sTagStack.indexOf("OPE-SPAN") == -1))
 				{
+					let oParent = obj.assignedSlot || obj.parentNode || obj.host;
 					let iChildCount = 0;
-					for (let ii = 0; ii < obj.parentNode.childNodes.length; ++ii)
+					for (let ii = 0; ii < oParent.childNodes.length; ++ii)
 					{
-						let oChild = obj.parentNode.childNodes[ii];
+						let oChild = oParent.childNodes[ii];
 						if (!IsNonText (oChild) && (oChild.nodeType != 8))
 						{
 							iChildCount++;
@@ -12131,7 +12187,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 					if (iChildCount == 1)
 					{
 						// this text node is the only relevant child, hook the parent
-						HookNoTx (obj.parentNode, sTagStack, sIdStack, sClassStack, sNoTxReason);
+						HookNoTx (oParent, sTagStack, sIdStack, sClassStack, sNoTxReason);
 					}
 					else
 					{
@@ -12151,7 +12207,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 		}
 
 		let iTransIndex = g_TranslatedText.indexOf(sNodeValue);
-		if ((iTransIndex !== -1) || (sNodeValue === obj.moxietx))
+		if ((!bAutoDetect && (iTransIndex !== -1)) || (sNodeValue === obj.moxietx))
 		{
 			// This is translated text. Don't send this.
 
@@ -12194,7 +12250,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 
 		if (bIsWhiteSpacePre)
 		{
-			if (MoxieTokenize(sNodeValue, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj))
+			if (MoxieTokenize(sNodeValue, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect))
 			{
 				bHasText = true;
 			}
@@ -12237,7 +12293,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 			}
 			else
 			{
-				if (MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, oTokenContext))
+				if (MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect, oTokenContext))
 				{
 					bHasText = true;
 				}
@@ -12317,7 +12373,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 							let iTransIndex   = g_TranslatedText.indexOf(attrNode.value);
 							let sNormalizedWS = attrNode.value.replace(/[\r\n\t\f\v ]+/g, " ");
 
-							if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && (attrNode.value !== attrNode.moxietx))
+							if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (bAutoDetect || (iTransIndex === -1)) && (attrNode.value !== attrNode.moxietx))
 							{
 								if ( MatchTransAttrs(sTagStack, sIdStack, sClassStack, obj, sAttrVal, attrNode.value) &&
 								    !MatchNoTransAttrs(sTagStack, sIdStack, sClassStack, obj, sAttrVal, attrNode.value))
@@ -12353,7 +12409,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 								let iTransIndex   = g_TranslatedText.indexOf(sBeforeContent);
 								let sNormalizedWS = sBeforeContent.replace(/[\r\n\t\f\v ]+/g, " ");
 
-								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && MoxieIsPseudoOk(sNormalizedWS))
+								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (bAutoDetect || (iTransIndex === -1)) && MoxieIsPseudoOk(sNormalizedWS))
 								{
 
 									g_PseudoObjCount += 1;
@@ -12376,7 +12432,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 								let iTransIndex   = g_TranslatedText.indexOf(sAfterContent);
 								let sNormalizedWS = sAfterContent.replace(/[\r\n\t\f\v ]+/g, " ");
 
-								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && MoxieIsPseudoOk(sNormalizedWS))
+								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (bAutoDetect || (iTransIndex === -1)) && MoxieIsPseudoOk(sNormalizedWS))
 								{
 									g_PseudoObjCount += 1;
 									let sKey = "moxieclassa" + g_PseudoObjCount.toString();
@@ -12447,7 +12503,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 					}
 				}
 
-				if (MoxieHtmlToJliff(bChildOneLinkTx, sChildNoTxReason, childObj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext))
+				if (MoxieHtmlToJliff(bChildOneLinkTx, sChildNoTxReason, childObj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext, bAutoDetect))
 				{
 					bHasText = true;
 				}
@@ -12512,7 +12568,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 							let iTransIndex   = g_TranslatedText.indexOf(attrNode.value);
 							let sNormalizedWS = attrNode.value.replace(/[\r\n\t\f\v ]+/g, " ");
 
-							if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && (attrNode.value !== attrNode.moxietx))
+							if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (bAutoDetect || (iTransIndex === -1)) && (attrNode.value !== attrNode.moxietx))
 							{
 								if ( MatchTransAttrs(sTagStack, sIdStack, sClassStack, obj, sAttrVal, attrNode.value) &&
 								    !MatchNoTransAttrs(sTagStack, sIdStack, sClassStack, obj, sAttrVal, attrNode.value))
@@ -12548,7 +12604,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 								let iTransIndex   = g_TranslatedText.indexOf(sBeforeContent);
 								let sNormalizedWS = sBeforeContent.replace(/[\r\n\t\f\v ]+/g, " ");
 			
-								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && MoxieIsPseudoOk(sNormalizedWS))
+								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (bAutoDetect || (iTransIndex === -1)) && MoxieIsPseudoOk(sNormalizedWS))
 								{
 									g_PseudoObjCount += 1;
 									let sKey = "moxieclassb" + g_PseudoObjCount.toString();
@@ -12570,7 +12626,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 								let iTransIndex   = g_TranslatedText.indexOf(sAfterContent);
 								let sNormalizedWS = sAfterContent.replace(/[\r\n\t\f\v ]+/g, " ");
 			
-								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && MoxieIsPseudoOk(sNormalizedWS))
+								if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (bAutoDetect || (iTransIndex === -1)) && MoxieIsPseudoOk(sNormalizedWS))
 								{
 									g_PseudoObjCount += 1;
 									let sKey = "moxieclassa" + g_PseudoObjCount.toString();
@@ -12600,7 +12656,7 @@ function MoxieHtmlToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, J
 } // MoxieHtmlToJliff
 
 //-----------------------------------------------------------------------------
-function MoxieBlockToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack)
+function MoxieBlockToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, bAutoDetect)
 //-----------------------------------------------------------------------------
 {
 	// Convert this Moxie HTML block
@@ -12670,7 +12726,7 @@ function MoxieBlockToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, 
 			}
 
 
-			if (MoxieHtmlToJliff(bChildOneLinkTx, sChildNoTxReason, childObj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext))
+			if (MoxieHtmlToJliff(bChildOneLinkTx, sChildNoTxReason, childObj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext, bAutoDetect))
 			{
 				bHasText = true;
 			}
@@ -12678,7 +12734,7 @@ function MoxieBlockToJliff (bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, 
 	}
 	else
 	{
-		bHasText = MoxieHtmlToJliff(bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext);
+		bHasText = MoxieHtmlToJliff(bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, oTokenContext, bAutoDetect);
 	}
 
 	return bHasText;
@@ -12707,10 +12763,37 @@ function MoxieReplaceChildTextNodes(obj)
 	}
 } // MoxieReplaceChildTextNodes
 
+
 //-----------------------------------------------------------------------------
-function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover, sObjType, sTagStack, sIdStack, sClassStack, sText)
+function RemoveHTMLTags(obj, aTags)
 //-----------------------------------------------------------------------------
 {
+	const aNodes = Array.from(obj.childNodes);
+	for (let ii = 0; ii < aNodes.length; ++ii) 
+	{
+		const nextNode = aNodes.length > ii + 1 ? aNodes[ii + 1] : null;
+		if (aNodes[ii].tagName) 
+		{
+			RemoveHTMLTags(aNodes[ii], aTags);
+			if (aTags.indexOf(aNodes[ii].tagName) !== -1)
+			{
+				while (aNodes[ii].childNodes.length > 0) 
+				{
+					if (nextNode) obj.insertBefore(aNodes[ii].childNodes[0], nextNode);
+					else obj.appendChild(aNodes[ii].childNodes[0]);	
+				}
+				obj.removeChild(aNodes[ii]);
+			}
+		}
+	}
+} // RemoveHTMLTags
+
+
+//-----------------------------------------------------------------------------
+function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetectLang, obj, oRollover, sObjType, sTagStack, sIdStack, sClassStack, sText)
+//-----------------------------------------------------------------------------
+{
+
 	if (typeof sText !== "string")
 	{
 		return;
@@ -12758,6 +12841,19 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 				return;
 			}
 
+			if (sObjType == "innerHTML")
+			{  
+				const aTags = MatchRemoveHTMLTag(sTagStack, sIdStack, sClassStack, obj);
+		
+				if (aTags) 
+				{           
+					DebugLog (2, "TIC matches Remove HTML Tag. Altering DOM:", obj, "");
+		
+					// do the normalization
+					RemoveHTMLTags(obj, aTags);
+				}           
+			}
+		
 			// "translate" rules override any OneLinkNoTx, notranslate or translate="no"
 			if (!bOneLinkTx && MatchTransTIC(sTagStack, sIdStack, sClassStack, obj))
 			{
@@ -12782,14 +12878,16 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 
 			// Generate JLIFF and object reference array from HTML
 
+			let bAutoDetect = bAutoDetectLang || MatchAutoDetectTIC(sTagStack, sIdStack, sClassStack, obj);
+
 			let bHadText = false;
 			if (sObjType == "innerHTML")
 			{
-				bHadText = MoxieBlockToJliff(bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack);
+				bHadText = MoxieBlockToJliff(bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, bAutoDetect);
 			}
 			else if (sObjType == "normal")
 			{
-				bHadText = MoxieBlockToJliff(bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack);
+				bHadText = MoxieBlockToJliff(bOneLinkTx, sNoTxReason, obj, DomObjs, TextForHash, JliffArray, MigrateJliffArray, InnerHtmlAttrs, InnerHtmlPseudos, sTagStack, sIdStack, sClassStack, bAutoDetect);
 			}
 			else if ((sObjType == "attribute") ||
 					 (sObjType == "inputvalue") ||
@@ -12797,14 +12895,25 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 					 (sObjType == "pseudobefore") ||
 					 (sObjType == "pseudoafter"))
 			{
+				if (!bAutoDetect)
+				{
+					let iTransIndex = g_TranslatedText.indexOf(sText);
+					if (iTransIndex !== -1)
+					{
+						return;
+					}
+				}
+
 				let TagCount        = {"value":0};
 				let MigrateTagCount = {"value":0};
-				bHadText = MoxieTokenize(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+				bHadText = MoxieTokenize(sText, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 			}
 
 			// Did we actually have any text for translation
 			if (bHadText)
 			{
+				DebugLog (2, "OneLinkMoxieJS found text for translation type:", sObjType, "");
+
 				let sTextHash = FNV1aHash(TextForHash.value);
 
 				let bWasPretranslated = false;
@@ -12819,127 +12928,147 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 
 					if (g_bIsOPE)
 					{
-						if (g_OPEBlocksSeen.indexOf(sTextHash) === -1)
+						if (!bAutoDetect && (g_OPEBlocksSeen.indexOf(sTextHash) === -1))
 						{
 							g_OPEBlocksSeen.push(sTextHash);
 							g_OPEBlocksForSegments.push(sTextHash);
 						}
 					}
 
-					// Now check the pre-translation array for this hash
-
-					// g_TranslationArray is a Map of JLIFF "target" arrays with the block hashes as the key names
-					// Example: {
-					//            "4839478745704896847":[
-					//              {"kind": "sc", "id": "1"},
-					//              {"text": "¡Hola amigo!"},
-					//              {"kind": "ec", "startRef": "1"},
-					//              {"kind": "sc", "id": "2"},
-					//              {"text": " ¿Cómo estás?"}
-					//              {"kind": "ec", "startRef": "2"},
-					//            ],
-					//            "7784781953345167553":[
-					//              {"text": " Cerveza por favor "}
-					//            ]
-					//          }
-					//
-					// Referencing g_TranslationArray["4839478745704896847"] would give us the Array value
-					// where (along with the DomObjs) we can reconstruct
-					// <span>¡Hola amigo!</span><b> ¿Cómo estás?</b>
-					try {
-						if (g_TranslationArray)
+					if (!bAutoDetect)
+					{
+						// Now check the pre-translation array for this hash
+	
+						// g_TranslationArray is a Map of JLIFF "target" arrays with the block hashes as the key names
+						// Example: {
+						//            "4839478745704896847":[
+						//              {"kind": "sc", "id": "1"},
+						//              {"text": "¡Hola amigo!"},
+						//              {"kind": "ec", "startRef": "1"},
+						//              {"kind": "sc", "id": "2"},
+						//              {"text": " ¿Cómo estás?"}
+						//              {"kind": "ec", "startRef": "2"},
+						//            ],
+						//            "7784781953345167553":[
+						//              {"text": " Cerveza por favor "}
+						//            ]
+						//          }
+						//
+						// Referencing g_TranslationArray["4839478745704896847"] would give us the Array value
+						// where (along with the DomObjs) we can reconstruct
+						// <span>¡Hola amigo!</span><b> ¿Cómo estás?</b>
+						try {
+							if (g_TranslationArray)
+							{
+								let TargetElements = g_TranslationArray[sTextHash];
+								if (TargetElements)
+								{
+									// substitute translation now
+									if ((sObjType == "pseudobefore") || (sObjType == "pseudoafter"))
+									{
+										MoxieReplacePseudoElement (obj, TargetElements, DomObjs);
+										DebugLog (2, "OneLinkMoxieJS pretranslated pseudo", sTextHash, obj);
+									}
+									else
+									{
+										MoxieReplaceLocation(obj, TargetElements, DomObjs);
+										DebugLog (2, "OneLinkMoxieJS pretranslated", sTextHash, obj);
+									}
+									if (g_bStatsActive && g_bSendStats)
+									{
+										if (g_PreTransBlocksUsed.indexOf(sTextHash) === -1)
+										{
+											g_PreTransBlocksUsed.push(sTextHash);
+										}
+									}
+									bWasPretranslated = true;
+								}
+							}
+						} catch (e) {
+							// No pre-translation array. Fall through to include this text in the TxRequest.
+						}
+	
+						if (!bWasPretranslated && !g_bIsOPE && !g_bIsGLNOW)
 						{
-							let TargetElements = g_TranslationArray[sTextHash];
+							let TargetElements = g_TargetCache[sTextHash];
 							if (TargetElements)
 							{
 								// substitute translation now
 								if ((sObjType == "pseudobefore") || (sObjType == "pseudoafter"))
 								{
 									MoxieReplacePseudoElement (obj, TargetElements, DomObjs);
-									DebugLog (2, "OneLinkMoxieJS pretranslated pseudo", sTextHash, obj);
+									DebugLog (2, "OneLinkMoxieJS already have translation for pseudo", sTextHash, obj);
 								}
 								else
 								{
 									MoxieReplaceLocation(obj, TargetElements, DomObjs);
-									DebugLog (2, "OneLinkMoxieJS pretranslated", sTextHash, obj);
-								}
-								if (g_bStatsActive && g_bSendStats)
-								{
-									if (g_PreTransBlocksUsed.indexOf(sTextHash) === -1)
-									{
-										g_PreTransBlocksUsed.push(sTextHash);
-									}
+									DebugLog (2, "OneLinkMoxieJS already have translation for", sTextHash, obj);
 								}
 								bWasPretranslated = true;
 							}
-						}
-					} catch (e) {
-						// No pre-translation array. Fall through to include this text in the TxRequest.
-					}
-
-					if (!bWasPretranslated && !g_bIsOPE && !g_bIsGLNOW)
-					{
-						let TargetElements = g_TargetCache[sTextHash];
-						if (TargetElements)
-						{
-							// substitute translation now
-							if ((sObjType == "pseudobefore") || (sObjType == "pseudoafter"))
-							{
-								MoxieReplacePseudoElement (obj, TargetElements, DomObjs);
-								DebugLog (2, "OneLinkMoxieJS already have translation for pseudo", sTextHash, obj);
-							}
-							else
-							{
-								MoxieReplaceLocation(obj, TargetElements, DomObjs);
-								DebugLog (2, "OneLinkMoxieJS already have translation for", sTextHash, obj);
-							}
-							bWasPretranslated = true;
 						}
 					}
 				}
 
 				if (g_bInMigrateMode)
 				{
-					DebugLog (2, "OneLinkMoxieJS migrating data for translation", sTextHash, MigrateJliffArray);
+					if (!bAutoDetect)
+					{
+						DebugLog (2, "OneLinkMoxieJS migrating data for translation", sTextHash, MigrateJliffArray);
 
-					g_MigrateTxRequest.text.push ({
-						"tag_stack" : sTagStack,
-						"id_stack" : sIdStack,
-						"class_stack" : sClassStack,
-						"source" : MigrateJliffArray,
-						"block_hash" : sTextHash
-					});
+						g_MigrateTxRequest.text.push ({
+							"tag_stack" : sTagStack,
+							"id_stack" : sIdStack,
+							"class_stack" : sClassStack,
+							"source" : MigrateJliffArray,
+							"block_hash" : sTextHash
+						});
 
-					let bSuppressMt = MatchSuppressMtTIC(sTagStack, sIdStack, sClassStack, obj);
-					g_MigrateTxNoStacks.push ({
-						"source" : MigrateJliffArray,
-						"block_hash" : sTextHash,
-						"suppress_mt": bSuppressMt
-					});
+						let bSuppressMt = MatchSuppressMtTIC(sTagStack, sIdStack, sClassStack, obj);
+						g_MigrateTxNoStacks.push ({
+							"source" : MigrateJliffArray,
+							"block_hash" : sTextHash,
+							"suppress_mt": bSuppressMt
+						});
+					}
 				}
 
 				if (!bWasPretranslated)
 				{
 					DebugLog (2, "OneLinkMoxieJS sending for translation", sTextHash, JliffArray);
 
-					g_LocationArray.push (obj);
-					g_DomObjsArray.push (DomObjs);
-					g_TxRequest.text.push ({
-						"tag_stack" : sTagStack,
-						"id_stack" : sIdStack,
-						"class_stack" : sClassStack,
-						"source" : JliffArray,
-						"block_hash" : sTextHash
-					});
-
 					let bSuppressMt = MatchSuppressMtTIC(sTagStack, sIdStack, sClassStack, obj);
-					g_TxNoStacks.push ({
-						"source" : JliffArray,
-						"block_hash" : sTextHash,
-						"suppress_mt": bSuppressMt
-					});
+					if (bAutoDetect)
+					{
+						g_AutoDetLocationArray.push (obj);
+						g_AutoDetDomObjsArray.push (DomObjs);
+						g_TxAutoDetect.push ({
+							"source" : JliffArray,
+							"block_hash" : sTextHash,
+							"suppress_mt": bSuppressMt
+						});
+					}
+					else
+					{
+						g_LocationArray.push (obj);
+						g_DomObjsArray.push (DomObjs);
 
-					if (g_bIsOPE)
+						g_TxRequest.text.push ({
+							"tag_stack" : sTagStack,
+							"id_stack" : sIdStack,
+							"class_stack" : sClassStack,
+							"source" : JliffArray,
+							"block_hash" : sTextHash
+						});
+
+						g_TxNoStacks.push ({
+							"source" : JliffArray,
+							"block_hash" : sTextHash,
+							"suppress_mt": bSuppressMt
+						});
+					}
+
+					if (g_bIsOPE && !bAutoDetect)
 					{
 						if ((sObjType == "pseudobefore") || (sObjType == "pseudoafter"))
 						{
@@ -12990,10 +13119,11 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 			}
 			else
 			{
-				DebugLog (2, "OneLinkMoxieJS no text found for translation", obj, "");
+				DebugLog (2, "OneLinkMoxieJS no text found for translation type:", sObjType, obj);
 			}
 
 			let bSuppressMtAttr = MatchSuppressMtTIC(sTagStack+":innerattr", sIdStack, sClassStack, obj);
+			let bAutoDetectAttr = bAutoDetectLang || MatchAutoDetectTIC(sTagStack+":innerattr", sIdStack, sClassStack, obj);
 
 			for (let ii=0; ii < InnerHtmlAttrs.attrnode.length; ++ii)
 			{
@@ -13008,7 +13138,7 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 
 				let TagCount        = {"value":0};
 				let MigrateTagCount = {"value":0};
-				let bAttrHadText = MoxieTokenize(sAttrText, AttrDomObjs, AttrTextForHash, JliffAttrs, MigrateJliffAttrs, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+				let bAttrHadText = MoxieTokenize(sAttrText, AttrDomObjs, AttrTextForHash, JliffAttrs, MigrateJliffAttrs, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj, bAutoDetectAttr);
 
 				if (bAttrHadText)
 				{
@@ -13026,52 +13156,55 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 
 						if (g_bIsOPE)
 						{
-							if (g_OPEBlocksSeen.indexOf(sAttrTextHash) === -1)
+							if (!bAutoDetectAttr && (g_OPEBlocksSeen.indexOf(sAttrTextHash) === -1))
 							{
 								g_OPEBlocksSeen.push(sAttrTextHash);
 								g_OPEBlocksForSegments.push(sAttrTextHash);
 							}
 						}
 
-						// Now check the pre-translation array for this hash
+						if (!bAutoDetectAttr)
+						{
+							// Now check the pre-translation array for this hash
 
-						try {
-							if (g_TranslationArray)
+							try {
+								if (g_TranslationArray)
+								{
+									let TargetElements = g_TranslationArray[sAttrTextHash];
+									if (TargetElements)
+									{
+										// substitute translation now
+										MoxieReplaceLocation(oAttrNode, TargetElements, AttrDomObjs);
+										DebugLog (2, "OneLinkMoxieJS pretranslated", sAttrTextHash, obj);
+										if (g_bStatsActive && g_bSendStats)
+										{
+											if (g_PreTransBlocksUsed.indexOf(sAttrTextHash) === -1)
+											{
+												g_PreTransBlocksUsed.push(sAttrTextHash);
+											}
+										}
+										bWasPretranslated = true;
+									}
+								}
+							} catch (e) {
+								// No pre-translation array. Fall through to include this text in the TxRequest.
+							}
+
+							if (!bWasPretranslated && !g_bIsOPE && !g_bIsGLNOW)
 							{
-								let TargetElements = g_TranslationArray[sAttrTextHash];
+								let TargetElements = g_TargetCache[sAttrTextHash];
 								if (TargetElements)
 								{
 									// substitute translation now
 									MoxieReplaceLocation(oAttrNode, TargetElements, AttrDomObjs);
-									DebugLog (2, "OneLinkMoxieJS pretranslated", sAttrTextHash, obj);
-									if (g_bStatsActive && g_bSendStats)
-									{
-										if (g_PreTransBlocksUsed.indexOf(sAttrTextHash) === -1)
-										{
-											g_PreTransBlocksUsed.push(sAttrTextHash);
-										}
-									}
+									DebugLog (2, "OneLinkMoxieJS already have translation for", sAttrTextHash, obj);
 									bWasPretranslated = true;
 								}
-							}
-						} catch (e) {
-							// No pre-translation array. Fall through to include this text in the TxRequest.
-						}
-
-						if (!bWasPretranslated && !g_bIsOPE && !g_bIsGLNOW)
-						{
-							let TargetElements = g_TargetCache[sAttrTextHash];
-							if (TargetElements)
-							{
-								// substitute translation now
-								MoxieReplaceLocation(oAttrNode, TargetElements, AttrDomObjs);
-								DebugLog (2, "OneLinkMoxieJS already have translation for", sAttrTextHash, obj);
-								bWasPretranslated = true;
 							}
 						}
 					}
 
-					if (g_bInMigrateMode)
+					if (g_bInMigrateMode && !bAutoDetectAttr)
 					{
 						DebugLog (2, "OneLinkMoxieJS migrating data for translation", sAttrTextHash, MigrateJliffAttrs);
 
@@ -13094,23 +13227,37 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 					{
 						DebugLog (2, "OneLinkMoxieJS sending inner attributes for translation", sAttrTextHash, JliffAttrs);
 
-						g_LocationArray.push (oAttrNode);
-						g_DomObjsArray.push (AttrDomObjs);
-						g_TxRequest.text.push ({
-							"tag_stack" : sTagStack+":innerattr",
-							"id_stack" : sIdStack,
-							"class_stack" : sClassStack,
-							"source" : JliffAttrs,
-							"block_hash" : sAttrTextHash
-						});
+						if (bAutoDetectAttr)
+						{
+							g_AutoDetLocationArray.push (oAttrNode);
+							g_AutoDetDomObjsArray.push (AttrDomObjs);
+							g_TxAutoDetect.push ({
+								"source" : JliffAttrs,
+								"block_hash" : sAttrTextHash,
+								"suppress_mt": bSuppressMtAttr
+							});
+						}
+						else
+						{
+							g_LocationArray.push (oAttrNode);
+							g_DomObjsArray.push (AttrDomObjs);
 
-						g_TxNoStacks.push ({
-							"source" : JliffAttrs,
-							"block_hash" : sAttrTextHash,
-							"suppress_mt": bSuppressMtAttr
-						});
+							g_TxRequest.text.push ({
+								"tag_stack" : sTagStack+":innerattr",
+								"id_stack" : sIdStack,
+								"class_stack" : sClassStack,
+								"source" : JliffAttrs,
+								"block_hash" : sAttrTextHash
+							});
 
-						if (g_bIsOPE)
+							g_TxNoStacks.push ({
+								"source" : JliffAttrs,
+								"block_hash" : sAttrTextHash,
+								"suppress_mt": bSuppressMtAttr
+							});
+						}
+
+						if (g_bIsOPE && !bAutoDetectAttr)
 						{
 							let OPEObject = {
 									"moxie_object" : oAttrNode,
@@ -13143,7 +13290,21 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 
 				let TagCount        = {"value":0};
 				let MigrateTagCount = {"value":0};
-				let bPseudoHadText = MoxieTokenize(sPseudoText, PseudoDomObjs, PseudoTextForHash, JliffPseudos, MigrateJliffPseudos, TagCount, MigrateTagCount, sTagStack, sIdStack, sClassStack, obj);
+
+				let sPseudoTagStack = sTagStack;
+
+				let sKeyIndex = sPseudoKey.indexOf("moxieclassb");
+				if (sKeyIndex !== -1)
+				{
+					sPseudoTagStack += "::before";
+				} else
+				{
+					sPseudoTagStack += "::after";
+				}
+
+				let bAutoDetectPseudo = bAutoDetectLang || MatchAutoDetectTIC(sPseudoTagStack, sIdStack, sClassStack, obj);
+
+				let bPseudoHadText = MoxieTokenize(sPseudoText, PseudoDomObjs, PseudoTextForHash, JliffPseudos, MigrateJliffPseudos, TagCount, MigrateTagCount, sPseudoTagStack, sIdStack, sClassStack, obj, bAutoDetectPseudo);
 
 				if (bPseudoHadText)
 				{
@@ -13161,115 +13322,113 @@ function MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, oRollover
 
 						if (g_bIsOPE)
 						{
-							if (g_OPEBlocksSeen.indexOf(sPseudoTextHash) === -1)
+							if (!bAutoDetectPseudo && (g_OPEBlocksSeen.indexOf(sPseudoTextHash) === -1))
 							{
 								g_OPEBlocksSeen.push(sPseudoTextHash);
 								g_OPEBlocksForSegments.push(sPseudoTextHash);
 							}
 						}
 
-						// Now check the pre-translation array for this hash
+						if (!bAutoDetectPseudo)
+						{
+							// Now check the pre-translation array for this hash
 
-						try {
-							if (g_TranslationArray)
+							try {
+								if (g_TranslationArray)
+								{
+									let TargetElements = g_TranslationArray[sPseudoTextHash];
+									if (TargetElements)
+									{
+										// substitute translation now
+										MoxieReplacePseudoElement (sPseudoKey, TargetElements, PseudoDomObjs);
+										DebugLog (2, "OneLinkMoxieJS pretranslated pseudo", sPseudoTextHash, obj);
+										if (g_bStatsActive && g_bSendStats)
+										{
+											if (g_PreTransBlocksUsed.indexOf(sPseudoTextHash) === -1)
+											{
+												g_PreTransBlocksUsed.push(sPseudoTextHash);
+											}
+										}
+										bWasPretranslated = true;
+									}
+								}
+							} catch (e) {
+								// No pre-translation array. Fall through to include this text in the TxRequest.
+							}
+
+							if (!bWasPretranslated && !g_bIsOPE && !g_bIsGLNOW)
 							{
-								let TargetElements = g_TranslationArray[sPseudoTextHash];
+								let TargetElements = g_TargetCache[sPseudoTextHash];
 								if (TargetElements)
 								{
 									// substitute translation now
 									MoxieReplacePseudoElement (sPseudoKey, TargetElements, PseudoDomObjs);
-									DebugLog (2, "OneLinkMoxieJS pretranslated pseudo", sPseudoTextHash, obj);
-									if (g_bStatsActive && g_bSendStats)
-									{
-										if (g_PreTransBlocksUsed.indexOf(sPseudoTextHash) === -1)
-										{
-											g_PreTransBlocksUsed.push(sPseudoTextHash);
-										}
-									}
+									DebugLog (2, "OneLinkMoxieJS already have translation for pseudo", sPseudoTextHash, obj);
 									bWasPretranslated = true;
 								}
-							}
-						} catch (e) {
-							// No pre-translation array. Fall through to include this text in the TxRequest.
-						}
-
-						if (!bWasPretranslated && !g_bIsOPE && !g_bIsGLNOW)
-						{
-							let TargetElements = g_TargetCache[sPseudoTextHash];
-							if (TargetElements)
-							{
-								// substitute translation now
-								MoxieReplacePseudoElement (sPseudoKey, TargetElements, PseudoDomObjs);
-								DebugLog (2, "OneLinkMoxieJS already have translation for pseudo", sPseudoTextHash, obj);
-								bWasPretranslated = true;
 							}
 						}
 					}
 
 					if (g_bInMigrateMode)
 					{
-						DebugLog (2, "OneLinkMoxieJS migrating data for translation", sPseudoTextHash, MigrateJliffPseudos);
-
-						let sPseudoTagStack = sTagStack;
-
-						let sKeyIndex = sPseudoKey.indexOf("moxieclassb");
-						if (sKeyIndex !== -1)
+						if (!bAutoDetectPseudo)
 						{
-							sPseudoTagStack += "::before";
-						} else
-						{
-							sPseudoTagStack += "::after";
+							DebugLog (2, "OneLinkMoxieJS migrating data for translation", sPseudoTextHash, MigrateJliffPseudos);
+
+							g_MigrateTxRequest.text.push ({
+								"tag_stack" : sPseudoTagStack,
+								"id_stack" : sIdStack,
+								"class_stack" : sClassStack,
+								"source" : MigrateJliffPseudos,
+								"block_hash" : sPseudoTextHash
+							});
+
+							let bSuppressMt = MatchSuppressMtTIC(sPseudoTagStack, sIdStack, sClassStack, obj);
+							g_MigrateTxNoStacks.push ({
+								"source" : MigrateJliffPseudos,
+								"block_hash" : sPseudoTextHash,
+								"suppress_mt": bSuppressMt
+							});
 						}
-
-						g_MigrateTxRequest.text.push ({
-							"tag_stack" : sPseudoTagStack,
-							"id_stack" : sIdStack,
-							"class_stack" : sClassStack,
-							"source" : MigrateJliffPseudos,
-							"block_hash" : sPseudoTextHash
-						});
-
-						let bSuppressMt = MatchSuppressMtTIC(sPseudoTagStack, sIdStack, sClassStack, obj);
-						g_MigrateTxNoStacks.push ({
-							"source" : MigrateJliffPseudos,
-							"block_hash" : sPseudoTextHash,
-							"suppress_mt": bSuppressMt
-						});
 					}
 
 					if (!bWasPretranslated)
 					{
 						DebugLog (2, "OneLinkMoxieJS sending inner pseudo for translation", sPseudoTextHash, JliffPseudos);
 
-						let sPseudoTagStack = sTagStack;
+						let bSuppressMt = MatchSuppressMtTIC(sPseudoTagStack, sIdStack, sClassStack, obj);
+						if (bAutoDetectPseudo)
+						{
+							g_AutoDetLocationArray.push (sPseudoKey);
+							g_AutoDetDomObjsArray.push (PseudoDomObjs);
+							g_TxAutoDetect.push ({
+								"source" : JliffPseudos,
+								"block_hash" : sPseudoTextHash,
+								"suppress_mt": bSuppressMt
+							});
+						}
+						else
+						{
+							g_LocationArray.push (sPseudoKey);
+							g_DomObjsArray.push (PseudoDomObjs);
 
-						let sKeyIndex = sPseudoKey.indexOf("moxieclassb");
-						if (sKeyIndex !== -1)
-						{
-							sPseudoTagStack += "::before";
-						} else
-						{
-							sPseudoTagStack += "::after";
+							g_TxRequest.text.push ({
+								"tag_stack" : sPseudoTagStack,
+								"id_stack" : sIdStack,
+								"class_stack" : sClassStack,
+								"source" : JliffPseudos,
+								"block_hash" : sPseudoTextHash
+							});
+
+							g_TxNoStacks.push ({
+								"source" : JliffPseudos,
+								"block_hash" : sPseudoTextHash,
+								"suppress_mt": bSuppressMt
+							});
 						}
 
-						g_LocationArray.push (sPseudoKey);
-						g_DomObjsArray.push (PseudoDomObjs);
-						g_TxRequest.text.push ({
-							"tag_stack" : sPseudoTagStack,
-							"id_stack" : sIdStack,
-							"class_stack" : sClassStack,
-							"source" : JliffPseudos,
-							"block_hash" : sPseudoTextHash
-						});
-
-						let bSuppressMt = MatchSuppressMtTIC(sPseudoTagStack, sIdStack, sClassStack, obj);
-						g_TxNoStacks.push ({
-							"source" : JliffPseudos,
-							"block_hash" : sPseudoTextHash,
-							"suppress_mt": bSuppressMt
-						});
-
-						if (g_bIsOPE)
+						if (g_bIsOPE && !bAutoDetectPseudo)
 						{
 							let OPEObject = {
 								"moxie_object" : obj,
@@ -13341,8 +13500,9 @@ function MoxieIncludes (sNeedle, sHaystack, sDelim/*=","*/)
 
 } // MoxieIncludes
 
+
 //-----------------------------------------------------------------------------
-function MatchCSSSelector(TicObj, obj, bCheckParents = true)
+function MatchCSSSelector(TicObj, obj)
 //-----------------------------------------------------------------------------
 {
 	let bFound = false;
@@ -13366,17 +13526,15 @@ function MatchCSSSelector(TicObj, obj, bCheckParents = true)
 				break;
 			}
 
-			if (bCheckParents)
+			// check all parent nodes as well for a match
+			let node = obj;
+
+			while (node = node.assignedSlot || node.parentNode || node.host || node.ownerElement)
 			{
-				// check all parent nodes as well for a match
-				let node = obj;
-				while ((node = node.parentNode) !== null)
+				if (foundObjs[i] === node)
 				{
-					if (foundObjs[i] === node)
-					{
-						bFound = true;
-						break;
-					}
+					bFound = true;
+					break;
 				}
 			}
 		}
@@ -13405,7 +13563,7 @@ function MatchUTICX(sTagStack, sIdStack, sClassStack, TicObj, obj)
   	{
     	bFound = true;
   	}
-	else if (TicObj.X && obj && obj.parentNode !== undefined)
+	else if (TicObj.X && obj)
 	{
 		bFound = MatchCSSSelector(TicObj, obj);
 	} 	
@@ -13423,6 +13581,27 @@ function MatchUTICX(sTagStack, sIdStack, sClassStack, TicObj, obj)
 	return bFound;
 
 } // MatchUTICX
+
+//-----------------------------------------------------------------------------
+function MatchRemoveHTMLTag(sTagStack, sIdStack, sClassStack, obj)
+//-----------------------------------------------------------------------------
+{
+	let aTags = [];
+	if (sTagStack && sIdStack && sClassStack)
+	{
+		for (let ii=0; ii < g_RemoveHTMLTags.length; ++ii)
+		{
+			let TicObj = g_RemoveHTMLTags[ii];
+
+			if (MatchUTICX(sTagStack, sIdStack, sClassStack, TicObj, obj))
+			{
+				aTags = aTags.concat(TicObj.tags);
+			}
+		}
+	}
+
+	return aTags.length ? aTags : false;
+} // MatchRemoveHTMLTag
 
 //-----------------------------------------------------------------------------
 function MatchSetAsBlockTag(sTagStack, sIdStack, sClassStack, obj)
@@ -13477,7 +13656,8 @@ function MatchLangSelectorTIC(sTagStack, sIdStack, sClassStack, Position, obj)
 
 			if (MatchUTICX(sTagStack, sIdStack, sClassStack, TicObj, obj))
 			{
-				Position.pos = TicObj.pos;
+				Position.pos  = TicObj.pos;
+				Position.type = TicObj.type;
 				return true;
 			}
 		}
@@ -13512,6 +13692,11 @@ function MatchNoTokenizeTIC(sTagStack, sIdStack, sClassStack,obj, sTokenizeType)
 function MatchNoAmiTIC(sTagStack, sIdStack, sClassStack)
 //-----------------------------------------------------------------------------
 {
+	if (g_bForceAMI)
+	{
+		return false;
+	}
+
 	if (sTagStack && sIdStack && sClassStack)
 	{
 		for (let ii=0; ii < g_NoAmiTICs.length; ++ii)
@@ -13607,6 +13792,24 @@ function MatchSuppressMtTIC(sTagStack, sIdStack, sClassStack, obj)
 } // MatchSuppressMtTIC
 
 //-----------------------------------------------------------------------------
+function MatchAutoDetectTIC(sTagStack, sIdStack, sClassStack, obj)
+//-----------------------------------------------------------------------------
+{
+	for (let ii=0; ii < g_AutoDetectTICs.length; ++ii)
+	{
+		let TicObj = g_AutoDetectTICs[ii];
+
+		if (MatchUTICX(sTagStack, sIdStack, sClassStack, TicObj, obj))
+		{
+			return true;
+		}
+	}
+
+	return false;
+
+} // MatchAutoDetectTIC
+
+//-----------------------------------------------------------------------------
 function MatchPseudoNoTransTIC(sTagStack, sIdStack, sClassStack, obj)
 //-----------------------------------------------------------------------------
 {
@@ -13700,7 +13903,7 @@ function MatchIgnoreHiddenTIC(sTagStack, sIdStack, sClassStack, obj)
 		}
 		else 
 		{
-			bFound = MatchCSSSelector(TicObj, obj, false);
+			bFound = MatchCSSSelector(TicObj, obj);
 			if (bFound) break;
 		}		
 	}
@@ -13896,7 +14099,7 @@ function ElementContainsInlineTag (sTagStack, sIdStack, sClassStack, obj)
 } // ElementContainsInlineTag
 
 //-----------------------------------------------------------------------------
-function MoxieFindAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
+function MoxieFindAttrs (bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack)
 //-----------------------------------------------------------------------------
 {
 	if (!obj) {
@@ -13908,7 +14111,7 @@ function MoxieFindAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
 		if (obj.tagName == "META")
 		{
 			// META tag is special
-			MoxieFindMetaAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
+			MoxieFindMetaAttrs (bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack);
 		}
 		else
 		{
@@ -13918,17 +14121,16 @@ function MoxieFindAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
 				let attrNode = obj.getAttributeNode(sAttrVal);
 				if (attrNode)
 				{
-					let iTransIndex   = g_TranslatedText.indexOf(attrNode.value);
 					let sNormalizedWS = attrNode.value.replace(/[\r\n\t\f\v ]+/g, " ");
 
-					if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && (attrNode.value !== attrNode.moxietx))
+					if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (attrNode.value !== attrNode.moxietx))
 					{
 						if ( MatchTransAttrs(sTagStack, sIdStack, sClassStack, obj, sAttrVal, attrNode.value) &&
 						    !MatchNoTransAttrs(sTagStack, sIdStack, sClassStack, obj, sAttrVal, attrNode.value))
 						{
 							let sAttrTagStack = sTagStack;
 							sAttrTagStack += ":" + sAttrVal;
-							MoxieFoundText (bIsTranslation, true, "", attrNode, obj, "attribute", sAttrTagStack, sIdStack, sClassStack, sNormalizedWS);
+							MoxieFoundText (bIsTranslation, true, "", bAutoDetect, attrNode, obj, "attribute", sAttrTagStack, sIdStack, sClassStack, sNormalizedWS);
 						}
 					}
 				}
@@ -13939,7 +14141,7 @@ function MoxieFindAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
 } // MoxieFindAttrs
 
 //-----------------------------------------------------------------------------
-function MoxieFindInputValue (bIsTranslation, obj, sTagStack, sIdStack, sClassStack, sTranslateKey, sHost)
+function MoxieFindInputValue (bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack, sTranslateKey, sHost)
 //-----------------------------------------------------------------------------
 {
 	if (!obj || (obj.tagName !== "INPUT" && obj.tagName !== "TEXTAREA")) 
@@ -13947,34 +14149,29 @@ function MoxieFindInputValue (bIsTranslation, obj, sTagStack, sIdStack, sClassSt
 		return;
 	}
 
-	let iTransIndex   = g_TranslatedText.indexOf(obj.value);
-
-	if (iTransIndex === -1) 
+	if ( MatchTransInputValue(sTagStack, sIdStack, sClassStack, obj, obj.value) &&
+		!MatchNoTransInputValue(sTagStack, sIdStack, sClassStack, obj, obj.value))
 	{
-		if ( MatchTransInputValue(sTagStack, sIdStack, sClassStack, obj, obj.value) &&
-			!MatchNoTransInputValue(sTagStack, sIdStack, sClassStack, obj, obj.value))
+		let sInputValueTagStack = sTagStack;
+		sInputValueTagStack += ":value";
+		let attrNode = obj.getAttributeNode("value");
+		if (!attrNode) 
 		{
-			let sInputValueTagStack = sTagStack;
-			sInputValueTagStack += ":value";
-			let attrNode = obj.getAttributeNode("value");
-			if (!attrNode) 
-			{
-				// if the client JS created the input dynamically it might not have an attrNode
-				// depending on how they did it
-				obj.setAttribute("value", obj.value);
-				attrNode = obj.getAttributeNode("value");
-			}
+			// if the client JS created the input dynamically it might not have an attrNode
+			// depending on how they did it
+			obj.setAttribute("value", obj.value);
+			attrNode = obj.getAttributeNode("value");
+		}
 
-			if (attrNode && (obj.value !== obj.moxietx))
-			{
-				MoxieFoundText (bIsTranslation, true, "", attrNode, obj, "inputvalue", sInputValueTagStack, sIdStack, sClassStack, obj.value);
-			}
+		if (attrNode && (obj.value !== obj.moxietx))
+		{
+			MoxieFoundText (bIsTranslation, true, "", bAutoDetect, attrNode, obj, "inputvalue", sInputValueTagStack, sIdStack, sClassStack, obj.value);
+		}
 
-			if (bIsTranslation && !obj.moxieobserved) 
-			{
-				obj.moxieobserved = true;
-				MoxieWatchInputValue(obj, sTranslateKey, sHost);
-			}
+		if (bIsTranslation && !obj.moxieobserved) 
+		{
+			obj.moxieobserved = true;
+			MoxieWatchInputValue(obj, sTranslateKey, sHost);
 		}
 	}
 } // MoxieFindInputValue
@@ -13993,7 +14190,7 @@ function MoxieIsPseudoOk (sText)
 } // MoxieIsPseudoOk
 
 //-----------------------------------------------------------------------------
-function MoxieFindPseudoElements (bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
+function MoxieFindPseudoElements (bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack)
 //-----------------------------------------------------------------------------
 {
 	try
@@ -14024,17 +14221,16 @@ function MoxieFindPseudoElements (bIsTranslation, obj, sTagStack, sIdStack, sCla
 				sBeforeContent = sBeforeContent.replace(/^["']/, "");
 				sBeforeContent = sBeforeContent.replace(/["']$/, "");
 
-				let iTransIndex   = g_TranslatedText.indexOf(sBeforeContent);
 				let sNormalizedWS = sBeforeContent.replace(/[\r\n\t\f\v ]+/g, " ");
 
-				if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && MoxieIsPseudoOk(sNormalizedWS))
+				if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && MoxieIsPseudoOk(sNormalizedWS))
 				{
 					g_PseudoObjCount += 1;
 					let sKey = "moxieclassb" + g_PseudoObjCount.toString();
 					g_PseudoObjMapping[sKey] = obj;
 
 					let sPseudoTagStack = sTagStack + "::before";
-					MoxieFoundText (bIsTranslation, true, "", sKey, sKey, "pseudobefore", sPseudoTagStack, sIdStack, sClassStack, sNormalizedWS);
+					MoxieFoundText (bIsTranslation, true, "", bAutoDetect, sKey, sKey, "pseudobefore", sPseudoTagStack, sIdStack, sClassStack, sNormalizedWS);
 					g_MoxiePseudoObserver.observe(obj, { attributes: true, attributeFilter: ["class"] });
 				}
 			}
@@ -14045,17 +14241,16 @@ function MoxieFindPseudoElements (bIsTranslation, obj, sTagStack, sIdStack, sCla
 				sAfterContent = sAfterContent.replace(/^["']/, "");
 				sAfterContent = sAfterContent.replace(/["']$/, "");
 
-				let iTransIndex   = g_TranslatedText.indexOf(sAfterContent);
 				let sNormalizedWS = sAfterContent.replace(/[\r\n\t\f\v ]+/g, " ");
 
-				if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && MoxieIsPseudoOk(sNormalizedWS))
+				if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && MoxieIsPseudoOk(sNormalizedWS))
 				{
 					g_PseudoObjCount += 1;
 					let sKey = "moxieclassa" + g_PseudoObjCount.toString();
 					g_PseudoObjMapping[sKey] = obj;
 
 					let sPseudoTagStack = sTagStack + "::after";
-					MoxieFoundText (bIsTranslation, true, "", sKey, sKey, "pseudoafter", sPseudoTagStack, sIdStack, sClassStack, sNormalizedWS);
+					MoxieFoundText (bIsTranslation, true, "", bAutoDetect, sKey, sKey, "pseudoafter", sPseudoTagStack, sIdStack, sClassStack, sNormalizedWS);
 					g_MoxiePseudoObserver.observe(obj, { attributes: true, attributeFilter: ["class"] });
 				}
 			}
@@ -14063,10 +14258,10 @@ function MoxieFindPseudoElements (bIsTranslation, obj, sTagStack, sIdStack, sCla
 	} catch (e) {
 		console.warn("OneLinkMoxieJS error checking for pseudo-elements in", obj);
 	}
-} // MoxieFindPseudoElement
+} // MoxieFindPseudoElements
 
 //-----------------------------------------------------------------------------
-function MoxieFindMetaAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
+function MoxieFindMetaAttrs (bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack)
 //-----------------------------------------------------------------------------
 {
 	if (!obj) {
@@ -14089,13 +14284,12 @@ function MoxieFindMetaAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassSta
 				let ContentAttrNode = obj.getAttributeNode("content");
 				if (ContentAttrNode)
 				{
-					let iTransIndex   = g_TranslatedText.indexOf(ContentAttrNode.value);
 
-					if ((iTransIndex === -1) && (ContentAttrNode.value !== ContentAttrNode.moxietx))
+					if (ContentAttrNode.value !== ContentAttrNode.moxietx)
 					{
 						let sAttrTagStack = sTagStack;
 						sAttrTagStack += "." + sNameNodeValue;
-						MoxieFoundText (bIsTranslation, true, "", ContentAttrNode, obj, "meta", sAttrTagStack, sIdStack, sClassStack, ContentAttrNode.value);
+						MoxieFoundText (bIsTranslation, true, "", bAutoDetect, ContentAttrNode, obj, "meta", sAttrTagStack, sIdStack, sClassStack, ContentAttrNode.value);
 					}
 				}
 			}
@@ -14110,14 +14304,13 @@ function MoxieFindMetaAttrs (bIsTranslation, obj, sTagStack, sIdStack, sClassSta
 				let ContentAttrNode = obj.getAttributeNode("content");
 				if (ContentAttrNode)
 				{
-					let iTransIndex   = g_TranslatedText.indexOf(ContentAttrNode.value);
 					let sNormalizedWS = ContentAttrNode.value.replace(/[\r\n\t\f\v ]+/g, " ");
 
-					if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && (ContentAttrNode.value !== ContentAttrNode.moxietx))
+					if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (ContentAttrNode.value !== ContentAttrNode.moxietx))
 					{
 						let sAttrTagStack = sTagStack;
 						sAttrTagStack += "." + sPropertyNodeValue;
-						MoxieFoundText (bIsTranslation, true, "", ContentAttrNode, obj, "meta", sAttrTagStack, sIdStack, sClassStack, sNormalizedWS);
+						MoxieFoundText (bIsTranslation, true, "", bAutoDetect, ContentAttrNode, obj, "meta", sAttrTagStack, sIdStack, sClassStack, sNormalizedWS);
 					}
 				}
 			}
@@ -14160,11 +14353,20 @@ function MoxieGetTICs (obj, TicValues)
 	TicValues.id_stack = "/" + TicValues.id_stack;
 	TicValues.class_stack = "/" + TicValues.class_stack;
 
-	let oParent = obj.parentNode;
-	if (!oParent && (obj.nodeType == 11))
+	let oParent = null;
+	if (obj.nodeType == 11)
 	{
 		oParent = obj.host;
 	}
+	else if (obj.assignedSlot)
+	{
+		oParent = obj.assignedSlot;
+	}
+	else
+	{
+		oParent = obj.parentNode;
+	}
+
 	if (oParent)
 	{
 		MoxieGetTICs(oParent, TicValues);
@@ -14286,7 +14488,7 @@ function FindLangSelectorObj (obj, Position, iLevel, sTagStack, sIdStack, sClass
 } // FindLangSelectorObj
 
 //-----------------------------------------------------------------------------
-function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly, sTranslateKey, sHost, iLevel, sTagStack, sIdStack, sClassStack)
+function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, obj, bAssetsOnly, sTranslateKey, sHost, iLevel, sTagStack, sIdStack, sClassStack)
 //-----------------------------------------------------------------------------
 {
 	// root call: MoxieWalkDOM (document.documentElement);
@@ -14303,6 +14505,14 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 		if (!obj.moxieintersect) MoxieWalkWhenVisible(obj, sTranslateKey, sHost);
 		return;
 	}
+	else if (obj.nodeType === 2 
+		&& MatchIgnoreHiddenTIC(sTagStack, sIdStack, sClassStack, obj.ownerElement)
+		&& !g_IntersectSet.has(obj.ownerElement)) 
+	{
+		// defer walking until the element is visible
+		if (!obj.ownerElement.moxieintersect) MoxieWalkWhenVisible(obj.ownerElement, sTranslateKey, sHost);
+		return;
+	}
 	else if (!iLevel)
 	{
 		iLevel    = 0;
@@ -14310,18 +14520,23 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 		sIdStack = "/";
 		sClassStack = "/";
 
-		let oParent = obj.parentNode;
+		let oParent = null;
 
-		if (!oParent)
+		if ((obj.nodeType == 2/*ATTR*/) && obj.ownerElement)
 		{
-			if ((obj.nodeType == 2/*ATTR*/) && obj.ownerElement)
-			{
-				oParent = obj.ownerElement;
-			}
-			else if ((obj.nodeType == 11/*FRAGMENT*/) && obj.host)
-			{
-				oParent = obj.host;
-			}
+			oParent = obj.ownerElement;
+		}
+		else if ((obj.nodeType == 11/*FRAGMENT*/) && obj.host)
+		{
+			oParent = obj.host;
+		}
+		else if (obj.assignedSlot)
+		{
+			oParent = obj.assignedSlot;
+		}
+		else
+		{
+			oParent = obj.parentNode;
 		}
 
 		if (oParent && (oParent !== document))
@@ -14343,6 +14558,8 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 		let NoTxReason = {"reason":""};
 		bOneLinkTx = GetOneLinkTxState(obj, NoTxReason);
 		sNoTxReason = NoTxReason.reason;
+
+		bAutoDetect = GetOneLinkAutoState(obj);
 
 		DebugLog (1, "OneLinkMoxieJS starting DOM walk at", obj, "");
 	}
@@ -14368,6 +14585,11 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 		{
 			bOneLinkTx = false;
 			sNoTxReason = "(attribute)";
+		}
+
+		if (ClassListContains(obj, "OneLinkAuto"))
+		{
+			bAutoDetect = true;
 		}
 	}
 
@@ -14432,10 +14654,9 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 				sNodeValue = obj.moxiesrctext;
 			}
 
-			let iTransIndex = g_TranslatedText.indexOf(sNodeValue);
-			if ((iTransIndex === -1) && (sNodeValue !== obj.moxietx))
+			if (sNodeValue !== obj.moxietx)
 			{
-				MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, obj, "normal", sTagStack, sIdStack, sClassStack, sNodeValue);
+				MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, obj, obj, "normal", sTagStack, sIdStack, sClassStack, sNodeValue);
 			}
 		}
 	}
@@ -14443,14 +14664,13 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 	{
 		if (!bAssetsOnly)
 		{
-			let iTransIndex   = g_TranslatedText.indexOf(obj.value);
 			let sNormalizedWS = obj.value.replace(/[\r\n\t\f\v ]+/g, " ");
 
-			if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (iTransIndex === -1) && (obj.value !== obj.moxietx))
+			if ((sNormalizedWS !== "") && (sNormalizedWS !== " ") && (obj.value !== obj.moxietx))
 			{
 				let sAttrTagStack = sTagStack;
 				sAttrTagStack += ":" + obj.name;
-				MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, obj.ownerElement, "attribute", sAttrTagStack, sIdStack, sClassStack, sNormalizedWS);
+				MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, obj, obj.ownerElement, "attribute", sAttrTagStack, sIdStack, sClassStack, sNormalizedWS);
 			}
 		}
 	}
@@ -14464,12 +14684,12 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 		{
 			if (!bAssetsOnly)
 			{
-				MoxieFindAttrs(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
-				MoxieFindPseudoElements(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
+				MoxieFindAttrs(bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack);
+				MoxieFindPseudoElements(bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack);
 			}
 			if (obj.nodeType == 1/*ELEMENT*/)
 			{
-				ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, false);
+				ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, false, bAutoDetect);
 			}
 		}
 
@@ -14479,7 +14699,7 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 			{
 				obj.shadowRoot.tagName = "#shadow-root";
 			}
-			MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj.shadowRoot, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
+			MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, obj.shadowRoot, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
 
 			if (bIsTranslation && !obj.shadowRoot.moxieobserved)
 			{
@@ -14491,11 +14711,22 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 			}
 		}
 
+		if (obj.assignedNodes)
+		{
+			let AssignedNodes = obj.assignedNodes();
+
+			// loop through assigned nodes (they are not child nodes)
+			for (let ii = 0; ii < AssignedNodes.length; ++ii)
+			{
+				MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, AssignedNodes[ii], bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
+			}
+		}
+
 		try {
 			const oIFrameDoc = MoxieGetIFrameDoc(obj)
 			if (oIFrameDoc && !MatchIframeNoTrans(obj))
 			{
-				MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, oIFrameDoc.documentElement, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
+				MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, oIFrameDoc.documentElement, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
 
 				if (bIsTranslation && !obj.moxieobserved)
 				{
@@ -14534,7 +14765,7 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 		// loop through children:
 		for (let ii = 0; ii < obj.childNodes.length; ++ii)
 		{
-			MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj.childNodes[ii], bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
+			MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, obj.childNodes[ii], bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
 		}
 	}
 	else
@@ -14543,26 +14774,26 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 		{
 			if (obj.nodeType == 1/*ELEMENT*/)
 			{
-				ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, true);
+				ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, true, bAutoDetect);
 			}
 			if (!bAssetsOnly)
 			{
-				MoxieFindAttrs(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
-				MoxieFindInputValue(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, sTranslateKey, sHost);
-				MoxieFindPseudoElements(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
+				MoxieFindAttrs(bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack);
+				MoxieFindInputValue(bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack, sTranslateKey, sHost);
+				MoxieFindPseudoElements(bIsTranslation, obj, bAutoDetect, sTagStack, sIdStack, sClassStack);
 			}
 		}
 
 		if (!bAssetsOnly)
 		{
-			MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, obj, obj, "innerHTML", sTagStack, sIdStack, sClassStack, obj.innerHTML);
+			MoxieFoundText (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, obj, obj, "innerHTML", sTagStack, sIdStack, sClassStack, obj.innerHTML);
 		}
 
 		try {
 			const oIFrameDoc = MoxieGetIFrameDoc(obj);
 			if (oIFrameDoc && !MatchIframeNoTrans(obj))
 			{
-				MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, oIFrameDoc.documentElement, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
+				MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, oIFrameDoc.documentElement, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
 
 				if (bIsTranslation && !obj.moxieobserved)
 				{
@@ -14604,7 +14835,7 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 			{
 				obj.shadowRoot.tagName = "#shadow-root";
 			}
-			MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj.shadowRoot, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
+			MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, obj.shadowRoot, bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
 
 			if (bIsTranslation && !obj.shadowRoot.moxieobserved)
 			{
@@ -14613,6 +14844,17 @@ function MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, obj, bAssetsOnly
 				g_MoxieObserver.observe(obj.shadowRoot, config);
 
 				obj.shadowRoot.moxieobserved = true;
+			}
+		}
+
+		if (obj.assignedNodes)
+		{
+			let AssignedNodes = obj.assignedNodes();
+
+			// loop through assigned nodes (they are not child nodes)
+			for (let ii = 0; ii < AssignedNodes.length; ++ii)
+			{
+				MoxieWalkDOM (bIsTranslation, bOneLinkTx, sNoTxReason, bAutoDetect, AssignedNodes[ii], bAssetsOnly, sTranslateKey, sHost, iLevel+1, sTagStack, sIdStack, sClassStack);
 			}
 		}
 	}
@@ -14654,7 +14896,7 @@ function HideImage(obj)
 } // HideImage
 
 //-----------------------------------------------------------------------------
-function MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
+function MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bAutoDetectLang)
 //-----------------------------------------------------------------------------
 {
 	if (obj.src && !obj.src.startsWith("data:image"))
@@ -14736,12 +14978,12 @@ function MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 				let sNormalizedWS = oAltAttr.value.replace(/[\r\n\t\f\v ]+/g, " ");
 				if ((sNormalizedWS !== "") && (sNormalizedWS !== " "))
 				{
-					if ( MatchTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
-					    !MatchNoTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
-					{
-						let sAttrTagStack = sTagStack;
-						sAttrTagStack += ":alt";
+					let sAttrTagStack = sTagStack;
+					sAttrTagStack += ":alt";
 
+					if ( MatchTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
+					    !MatchNoTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
+					{
 						let JliffArray        = [];
 						let MigrateJliffArray = [];
 						let DomObjs           = {};
@@ -14749,7 +14991,9 @@ function MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 						let TagCount          = {"value":0};
 						let MigrateTagCount   = {"value":0};
 
-						let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj);
+						let bAutoDetect = bAutoDetectLang || MatchAutoDetectTIC(sAttrTagStack, sIdStack, sClassStack, obj);
+
+						let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 
 						// Did we actually have any text for translation
 						if (bHadText)
@@ -14767,7 +15011,7 @@ function MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 } // MoxieParseSrcAsset
 
 //-----------------------------------------------------------------------------
-function MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack)
+function MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bAutoDetectLang)
 //-----------------------------------------------------------------------------
 {
 	if (obj.srcset)
@@ -14923,12 +15167,12 @@ function MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassS
 					let sNormalizedWS = oAltAttr.value.replace(/[\r\n\t\f\v ]+/g, " ");
 					if ((sNormalizedWS !== "") && (sNormalizedWS !== " "))
 					{
-						if ( MatchTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
-						    !MatchNoTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
-						{
-							let sAttrTagStack = sTagStack;
-							sAttrTagStack += ":alt";
+						let sAttrTagStack = sTagStack;
+						sAttrTagStack += ":alt";
 
+						if ( MatchTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
+						    !MatchNoTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
+						{
 							let JliffArray        = [];
 							let MigrateJliffArray = [];
 							let DomObjs           = {};
@@ -14936,7 +15180,9 @@ function MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassS
 							let TagCount          = {"value":0};
 							let MigrateTagCount   = {"value":0};
 
-							let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj);
+							let bAutoDetect = bAutoDetectLang || MatchAutoDetectTIC(sAttrTagStack, sIdStack, sClassStack, obj);
+
+							let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 
 							// Did we actually have any text for translation
 							if (bHadText)
@@ -15016,7 +15262,7 @@ function MoxieCheckIfImage (sLinkRef)
 } // MoxieCheckIfImage
 
 //-----------------------------------------------------------------------------
-function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bRecursive)
+function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bRecursive, bAutoDetectLang)
 //-----------------------------------------------------------------------------
 {
 	// For Translation we are not capturing assets, we are applying any image translations from the pretranslate array
@@ -15127,12 +15373,12 @@ function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 					let sNormalizedWS = oAltAttr.value.replace(/[\r\n\t\f\v ]+/g, " ");
 					if ((sNormalizedWS !== "") && (sNormalizedWS !== " "))
 					{
-						if ( MatchTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
-						    !MatchNoTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
-						{
-							let sAttrTagStack = sTagStack;
-							sAttrTagStack += ":alt";
+						let sAttrTagStack = sTagStack;
+						sAttrTagStack += ":alt";
 
+						if ( MatchTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
+						    !MatchNoTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
+						{
 							let JliffArray        = [];
 							let MigrateJliffArray = [];
 							let DomObjs           = {};
@@ -15140,7 +15386,9 @@ function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 							let TagCount          = {"value":0};
 							let MigrateTagCount   = {"value":0};
 
-							let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj);
+							let bAutoDetect = bAutoDetectLang || MatchAutoDetectTIC(sAttrTagStack, sIdStack, sClassStack, obj);
+
+							let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 
 							// Did we actually have any text for translation
 							if (bHadText)
@@ -15158,22 +15406,22 @@ function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 
 		if (obj.tagName == "IMG")
 		{
-			MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
+			MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bAutoDetectLang);
 
-			MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
+			MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bAutoDetectLang);
 
 			MutationAttrs.push("src");
 			MutationAttrs.push("srcset");
 		}
 		else if (obj.tagName == "EMBED")
 		{
-			MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
+			MoxieParseSrcAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bAutoDetectLang);
 
 			MutationAttrs.push("src");
 		}
 		else if ((obj.tagName == "SOURCE") && obj.srcset)
 		{
-			MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack);
+			MoxieParseSrcSetAsset(bIsTranslation, obj, sTagStack, sIdStack, sClassStack, bAutoDetectLang);
 
 			MutationAttrs.push("srcset");
 		}
@@ -15212,12 +15460,12 @@ function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 								let sNormalizedWS = oAltAttr.value.replace(/[\r\n\t\f\v ]+/g, " ");
 								if ((sNormalizedWS !== "") && (sNormalizedWS !== " "))
 								{
-									if ( MatchTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
-									    !MatchNoTransAttrs(sTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
-									{
-										let sAttrTagStack = sTagStack;
-										sAttrTagStack += ":alt";
+									let sAttrTagStack = sTagStack;
+									sAttrTagStack += ":alt";
 
+									if ( MatchTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value) &&
+									    !MatchNoTransAttrs(sAttrTagStack, sIdStack, sClassStack, obj, "alt", oAltAttr.value))
+									{
 										let JliffArray        = [];
 										let MigrateJliffArray = [];
 										let DomObjs           = {};
@@ -15225,7 +15473,9 @@ function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 										let TagCount          = {"value":0};
 										let MigrateTagCount   = {"value":0};
 
-										let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj);
+										let bAutoDetect = bAutoDetectLang || MatchAutoDetectTIC(sAttrTagStack, sIdStack, sClassStack, obj);
+
+										let bHadText = MoxieTokenize(sNormalizedWS, DomObjs, TextForHash, JliffArray, MigrateJliffArray, TagCount, MigrateTagCount, sAttrTagStack, sIdStack, sClassStack, obj, bAutoDetect);
 
 										// Did we actually have any text for translation
 										if (bHadText)
@@ -15254,7 +15504,7 @@ function ProcessImageAssets(bIsTranslation, obj, sTagStack, sIdStack, sClassStac
 			let childObj = obj.childNodes[i];
 			if (childObj.nodeType == 1)
 			{
-				ProcessImageAssets(bIsTranslation, childObj, sTagStack, sIdStack, sClassStack, bRecursive);
+				ProcessImageAssets(bIsTranslation, childObj, sTagStack, sIdStack, sClassStack, bRecursive, bAutoDetectLang);
 			}
 		}
 	}
@@ -15547,7 +15797,6 @@ function MoxieReplaceLocation (obj, TargetElements, DomObjs)
 	for (let i=0; i<TextObjList.length; i++)
 	{
 		let oTextObj = TextObjList[i];
-
 		let iTransIndex = g_TranslatedText.indexOf(oTextObj.moxietx);
 		if (oTextObj.mxorigtx !== oTextObj.moxietx && iTransIndex === -1)
 		{
@@ -15665,7 +15914,7 @@ function MoxieReplacePseudoElement (sPseudoKey, TargetElements, DomObjs)
 } // MoxieReplacePseudoElement
 
 //-----------------------------------------------------------------------------
-function MoxieApplyTranslation (LocationArray, DomObjsArray, SourceArray, TargetArray, iOPEArrayIndex)
+function MoxieApplyTranslation (LocationArray, DomObjsArray, SourceArray, TargetArray, iOPEArrayIndex, bIgnoreOPE)
 //-----------------------------------------------------------------------------
 {
 	// LocationArray[]  :: simple array of locations where the target text needs to be put back into
@@ -15719,7 +15968,7 @@ function MoxieApplyTranslation (LocationArray, DomObjsArray, SourceArray, Target
 				{
 					let sTargetTrans = MoxieReplacePseudoElement(obj, TargetElements, DomObjs);
 
-					if (g_bIsOPE)
+					if (g_bIsOPE && !bIgnoreOPE)
 					{
 						let oOPEObject = g_OPEArray[iOPEIdx];
 						if (oOPEObject != null)
@@ -15736,7 +15985,7 @@ function MoxieApplyTranslation (LocationArray, DomObjsArray, SourceArray, Target
 				{
 					MoxieReplaceLocation(obj, TargetElements, DomObjs);
 
-					if (g_bIsOPE)
+					if (g_bIsOPE && !bIgnoreOPE)
 					{
 						let oOPEObject = g_OPEArray[iOPEIdx];
 						if (oOPEObject != null)
@@ -15764,7 +16013,7 @@ function MoxieApplyTranslation (LocationArray, DomObjsArray, SourceArray, Target
 } // MoxieApplyTranslation
 
 //-----------------------------------------------------------------------------
-function MoxieProcessAjax (oXHR, LocationArray, DomObjsArray, SourceArray, iOPEArrayIndex, ApiStat)
+function MoxieProcessAjax (oXHR, LocationArray, DomObjsArray, SourceArray, iOPEArrayIndex, ApiStat, bIgnoreOPE)
 //-----------------------------------------------------------------------------
 {
 	if ((oXHR.status < 200) || (oXHR.status > 299))
@@ -15784,7 +16033,7 @@ function MoxieProcessAjax (oXHR, LocationArray, DomObjsArray, SourceArray, iOPEA
 		return;
 	}
 
-	MoxieApplyTranslation (LocationArray, DomObjsArray, SourceArray, oJSON.text, iOPEArrayIndex);
+	MoxieApplyTranslation (LocationArray, DomObjsArray, SourceArray, oJSON.text, iOPEArrayIndex, bIgnoreOPE);
 
 } // MoxieProcessAjax
 
@@ -15873,11 +16122,16 @@ function MoxieSendStats (sTranslateKey, sHost, sLocation)
 {
 	if (g_bSendStats)
 	{
-		if (!g_bIsGLNOW)
+		// Make sure we have a token to send stats
+		if (MoxieXapisShouldRefreshToken()) 
 		{
-			g_bSendStats = false;
+			MoxieXapisToken(sHost, function() 
+			{
+				MoxieSendStats(sTranslateKey, sHost, sLocation);
+			});
+			return;
 		}
-
+	
 		try
 		{
 			let sUrlForHash = sLocation.toLowerCase();
@@ -15916,6 +16170,7 @@ function MoxieSendStats (sTranslateKey, sHost, sLocation)
 					method: "POST",
 					data: TranslateStats,
 					contentType: "application/json",
+					requestHeaders: {"x-onelink-token": g_XAPISToken},
 					success: function (oXHR, oParms) {
 						DebugLog (1, "OneLinkMoxieJS AMI /TranslateStats success", "", "");
 					},
@@ -15941,10 +16196,6 @@ function MoxieSendStats (sTranslateKey, sHost, sLocation)
 			console.error ("OneLinkMoxieJS error sending stats", e);
 		}
 	}
-//	else
-//	{
-//		// TODO send stats for "usage":g_BlockHashArray only
-//	}
 } // MoxieSendStats
 
 //-----------------------------------------------------------------------------
@@ -16096,6 +16347,7 @@ function MoxieSetupTranslateRules ()
 	g_PseudoNoTranslateTICs = [];
 	g_PseudoTranslateTICs   = [];
 	g_SuppressMtTICs        = [];
+	g_AutoDetectTICs        = [];
 	g_NoAmiTICs             = [];
 	g_NoTokenizeTICS        = [];
 	g_NoHostRewritesTICs    = [];
@@ -16154,6 +16406,16 @@ function MoxieSetupTranslateRules ()
 			// setup rules for "Ignore Hidden" UTICXs
 			MoxieSetupTranslateRule(g_TranslationRules.ignore_hidden, "ignore_hidden", g_IgnoreHiddenTICs);
 
+			// setup rules for remove_html_tags
+			MoxieSetupTranslateRule(g_TranslationRules.remove_html_tags, "remove_html_tags", g_RemoveHTMLTags, function(RuleObj, TicPattern) {
+				let sTagList = RuleObj.tags;
+				if (!sTagList || !Array.isArray(sTagList))
+				{
+					throw Error("Missing required tags property on 'remove_html_tags' rule, e.g. '[\"MARK\"]' ");
+				}
+				TicPattern.tags = sTagList.map(function(x){ return x.toUpperCase(); });
+			});
+
 			// setup rules for "Translation Attrs" UTICXs
 			MoxieSetupTranslateRule(g_TranslationRules.translate_attributes, "translate_attributes", g_TranslateAttrs, function(RuleObj, TicPattern){
 				let Attrs = RuleObj.attrs;
@@ -16194,6 +16456,9 @@ function MoxieSetupTranslateRules ()
 			
 			// setup rules for "Suppress MT" UTICXs
 			MoxieSetupTranslateRule(g_TranslationRules.suppress_mt, "suppress_mt", g_SuppressMtTICs);
+			
+			// setup rules for "Auto Detect Language" UTICXs
+			MoxieSetupTranslateRule(g_TranslationRules.auto_detect, "auto_detect", g_AutoDetectTICs);
 			
 			// setup rules for "No Tokenize" UTICXs 
 			MoxieSetupTranslateRule(g_TranslationRules.no_tokenize, "no_tokenize", g_NoTokenizeTICS, function(RuleObj, TicPattern){
@@ -16253,6 +16518,13 @@ function MoxieSetupTranslateRules ()
 					sPosition = "last";
 				}
 				TicPattern.pos = sPosition;
+
+				let sType = RuleObj.type;
+				if (!sType)
+				{
+					sType = "select";
+				}
+				TicPattern.type = sType;
 			});
 			if (g_TranslationRules.language_selector && (g_TranslationRules.language_selector.length > 0))
 			{
@@ -16461,6 +16733,151 @@ function MoxieSetupTranslateRules ()
 } // MoxieSetupTranslateRules
 
 //-----------------------------------------------------------------------------
+function ReFetchPretranslate(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj)
+//-----------------------------------------------------------------------------
+{
+	let bIsChromeExtension = document.querySelector("meta[name='moxieextension']");
+
+	if ((g_sPretranslateMode == "off") || bIsChromeExtension)
+	{
+		ProcessTransObjQueue(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj);
+		return;
+	}
+
+	let sUrlLocation = OneLinkMoxieJS.GetPathForHash();
+
+	var sUrlHash = OneLinkMoxieJS.FNV1aHash(sUrlLocation.toLowerCase());
+
+	var ApiStat = {
+		"api_name"         : "Pretranslate",
+		"body_size_bytes"  : 0,
+		"roundtrip_usecs"  : 0,
+		"x_cache"          : "",
+		"age"              : ""
+	};
+
+	g_bPretransInProgress = true;
+
+	var nKjaxStart = window.performance.now();
+	k$jax ({
+		url: sHost + "xapis/Pretranslate/" + sTranslateKey + "/" + sUrlHash + "/" + g_sPretranslateMode + ".json",
+		method: "GET",
+		success: function (oXHR, oParms) {
+			g_bPretransInProgress = false;
+			try
+			{
+				let oJsonResponse     = JSON.parse(oXHR.responseText);
+				let oTranslationArray = oJsonResponse.targets;
+				let oTransAssetsArray = oJsonResponse.assets;
+
+				OneLinkMoxieJS.MoxieSetTranslationArray(oTranslationArray);
+				OneLinkMoxieJS.MoxieSetAssetArray(oTransAssetsArray);
+
+				try
+				{
+					var nTime = (window.performance.now() - nKjaxStart) * 1000;
+					ApiStat.roundtrip_usecs = Math.floor(nTime);
+					var nResponseSize = 0;
+					var sBody = oXHR.responseText;
+					var c;
+					for(var i=0;c=sBody.charCodeAt(i++);nResponseSize+=c>>11?3:c>>7?2:1){}
+					ApiStat.body_size_bytes = nResponseSize;
+
+					var HeadersList = oXHR.getAllResponseHeaders();
+					var HeaderArray = HeadersList.trim().split(/[\r\n]+/);
+					HeaderArray.forEach(function (line)
+					{
+						var HeaderParts = line.split(': ');
+						var sHeader = HeaderParts.shift();
+						if (sHeader == 'x-cache')
+						{
+							var sXCache = HeaderParts.join(': ');
+							ApiStat.x_cache = sXCache;
+						}
+						if (sHeader == 'age')
+						{
+							var sAge = HeaderParts.join(': ');
+							ApiStat.age = sAge;
+						}
+					});
+				}
+				catch (e) {}
+
+				OneLinkMoxieJS.MoxieApiStatsPush(ApiStat);
+
+				ProcessTransObjQueue(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj);
+			}
+			catch (e)
+			{
+				console.warn("Error reading Pretranslate JSON:", e)
+				ProcessTransObjQueue(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj);
+			}
+		},
+		failure: function (oXHR, oParms) {
+			g_bPretransInProgress = false;
+			ProcessTransObjQueue(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj);
+		},
+		retry_count: 0
+	});
+
+} // ReFetchPretranslate
+
+//-----------------------------------------------------------------------------
+function ProcessTransObjQueue(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj)
+//-----------------------------------------------------------------------------
+{
+	// Starting position in global OPE Array for data from this translation request
+	let iOPEArrayIndex = g_OPEArray.length;
+
+	g_OPEBlocksForSegments = [];
+
+	let bIsTranslation = true;
+	let bOneLinkTx     = true;  // value is not relevant. MoxieWalkDom will calculate what it is.
+	let bAutoDetect    = false; // value is not relevant. MoxieWalkDom will calculate what it is.
+
+	const oWalkedSet = new Set();
+	if (topObj)
+	{
+		MoxieWalkDOM (bIsTranslation, bOneLinkTx, "", bAutoDetect, topObj, bAssetsOnly, sTranslateKey, sHost);
+		oWalkedSet.add(topObj);
+	}
+
+	for (let i=0; i<g_TranslateObjQueue.length; i++)
+	{
+		let oNextTopObj = g_TranslateObjQueue[i];
+		if (oWalkedSet.has(oNextTopObj))
+		{
+			continue;
+		}
+		oWalkedSet.add(oNextTopObj);
+
+		if (oNextTopObj.parentNode || oNextTopObj.assignedSlot ||
+		    ((oNextTopObj.nodeType == 2/*ATTR*/) && oNextTopObj.ownerElement) ||
+		    ((oNextTopObj.nodeType == 11/*FRAGMENT*/) && oNextTopObj.host))
+		{
+			// If it doesn't have a parent, it's not in the DOM anymore
+			MoxieWalkDOM (bIsTranslation, bOneLinkTx, "", bAutoDetect, oNextTopObj, bAssetsOnly, sTranslateKey, sHost);
+		}
+	}
+	g_TranslateObjQueue = [];
+
+	if (g_bIsOPE)
+	{
+		if (g_OPEBlocksForSegments.length > 0)
+		{
+			if (typeof GetSegmentsOPE === "function")
+			{
+				GetSegmentsOPE(g_OPEBlocksForSegments);
+			}
+			g_OPEBlocksForSegments = [];
+		}
+	}
+
+	MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks, bAssetsOnly);
+
+} // ProcessTransObjQueue
+
+//-----------------------------------------------------------------------------
 function MoxieWatchForShadowRoot ()
 //-----------------------------------------------------------------------------
 {
@@ -16561,14 +16978,20 @@ function MoxieWatchIframeForShadowRoot (oIFrame)
 } // MoxieWatchIframeForShadowRoot
 
 //-----------------------------------------------------------------------------
-function IsPageInScope ()
+function IsPageInScope (sUrl)
 //-----------------------------------------------------------------------------
 {
 	if (!g_ExcludedUris || (g_ExcludedUris.length == 0))
 	{
 		return true;
 	}
-
+	
+	let sUrltoTest = g_sMoxieLocation;
+        if (sUrl)
+        {
+ 	    sUrltoTest = sUrl;
+        }
+    
 	for (let i=0; i < g_ExcludedUris.length; i++)
 	{
 		let sExUriPattern = g_ExcludedUris[i];
@@ -16576,7 +16999,7 @@ function IsPageInScope ()
 		{
 			let ExcludeUriRegex = new RegExp(sExUriPattern);
 
-			if (ExcludeUriRegex.test(g_sMoxieLocation))
+			if (ExcludeUriRegex.test(sUrltoTest))
 			{
 				// It was explicitly excluded.
 				// Now see if there is an explicit include override
@@ -16590,7 +17013,7 @@ function IsPageInScope ()
 						try
 						{
 							let IncludeUriRegex = new RegExp(sIncUriPattern);
-							if (IncludeUriRegex.test(g_sMoxieLocation))
+							if (IncludeUriRegex.test(sUrltoTest))
 							{
 								return true;
 							}
@@ -16773,11 +17196,17 @@ function MoxieTranslate (sTranslateKey, sHost, topObj, bAssetsOnly)
 			}
 			document.documentElement.style.opacity=1;
 			document.documentElement.style.filter='alpha(opacity=100)';
+
+			g_bSendStats = false;
+
 			return;
 		}
 
 		if (!g_bInitDelayDone)
 		{
+			ApplyCustomStyles();
+			ApplyCustomJs();
+
 			g_nMoxiePageStart = window.performance.now();
 
 			g_bInitDelayDone = true;
@@ -16920,16 +17349,20 @@ function MoxieTranslate (sTranslateKey, sHost, topObj, bAssetsOnly)
 		}
 	}
 
-	if (!g_bTranslateInProgress)
+	if (!g_bTranslateInProgress && !g_bAutoTransInProgress && !g_bPretransInProgress)
 	{
 		let bIsTranslation = true;
-		let bOneLinkTx     = true;
+		let bOneLinkTx     = true;  // value is not relevant. MoxieWalkDom will calculate what it is.
+		let bAutoDetect    = false; // value is not relevant. MoxieWalkDom will calculate what it is.
 
 		// Check if location changed via pushstate
 		let sMoxieLocation = GetPath();
 
+		let bUrlChanged = false;
 		if (sMoxieLocation != g_sMoxieLocation)
 		{
+			bUrlChanged = true;
+
 			if (g_bStatsActive)
 			{
 				MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
@@ -16939,6 +17372,19 @@ function MoxieTranslate (sTranslateKey, sHost, topObj, bAssetsOnly)
 			// re-parse Translation Rules
 			// this will also reset global info like g_sMoxieLocation and g_bSendStats
 			MoxieSetupTranslateRules();
+
+			if (g_bIsOPE)
+			{           
+				// Tell OPE the document location has changed 
+				if (OPEEditor && (typeof OPEEditor.OPELocationChanged === "function"))
+				{           
+					try
+					{
+						OPEEditor.OPELocationChanged();
+					} 
+					catch (error) {}
+				}           
+			} 
 
 			if (g_bStatsActive)
 			{
@@ -16956,47 +17402,15 @@ function MoxieTranslate (sTranslateKey, sHost, topObj, bAssetsOnly)
 			return;
 		}
 
-		// Starting position in global OPE Array for data from this translation request
-		let iOPEArrayIndex = g_OPEArray.length;
-
-		g_OPEBlocksForSegments = [];
-
-		let nWalkStart = window.performance.now();
-		MoxieWalkDOM (bIsTranslation, bOneLinkTx, "", topObj, bAssetsOnly, sTranslateKey, sHost);
-		let nWalkTime = (window.performance.now() - nWalkStart) * 1000;
-		if (g_QAStats.parse_dom_usecs == 0)
+		if (bUrlChanged)
 		{
-			g_QAStats.parse_dom_usecs = Math.floor(nWalkTime);
+			// Re-Fetch the Pretranslate JSON for the new URL
+			ReFetchPretranslate(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj);
 		}
-
-		for (let i=0; i<g_TranslateObjQueue.length; i++)
+		else
 		{
-			let oNextTopObj = g_TranslateObjQueue[i];
-			if (oNextTopObj.parentNode ||
-			    ((oNextTopObj.nodeType == 2/*ATTR*/) && oNextTopObj.ownerElement) ||
-			    ((oNextTopObj.nodeType == 11/*FRAGMENT*/) && oNextTopObj.host))
-			{
-				// If it doesn't have a parent, it's not in the DOM anymore
-				MoxieWalkDOM (bIsTranslation, bOneLinkTx, "", oNextTopObj, bAssetsOnly, sTranslateKey, sHost);
-			}
+			ProcessTransObjQueue(sTranslateKey, sHost, bRewriteLinks, bAssetsOnly, topObj);
 		}
-		g_TranslateObjQueue = [];
-
-		DebugLog (1, "OneLinkMoxieJS done walking DOM and all queued objects", "", "");
-
-		if (g_bIsOPE)
-		{
-			if (g_OPEBlocksForSegments.length > 0)
-			{
-				if (typeof GetSegmentsOPE === "function")
-				{
-					GetSegmentsOPE(g_OPEBlocksForSegments);
-				}
-				g_OPEBlocksForSegments = [];
-			}
-		}
-
-		MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks, bAssetsOnly);
 	}
 	else
 	{
@@ -17020,6 +17434,75 @@ function ProcessMigrateData(sHost)
 	let sUrlForHash = GetPathForHash();
 	let sUrlHash    = FNV1aHash(sUrlForHash.toLowerCase());
 
+	k$jax ({
+		url: sHost + "xapis/Pretranslate/" + g_sMigrateTKey + "/" + sUrlHash + "/all.json",
+		method: "GET",
+		success: function (oXHR, oParms) {
+			DebugLog (1, "OneLinkMoxieJS Migrate Data /Pretranslate success", "", "");
+
+			try
+			{
+				let oPretransResponse = JSON.parse(oXHR.responseText);
+				let oPretranslationArray = oPretransResponse.targets;
+				if (oPretranslationArray)
+				{
+					// Remove any block hashes that are in the Pretranlate Array
+
+					let i = g_MigrateTxNoStacks.length;
+					while (i--)
+					{
+						let TextBlock  = g_MigrateTxNoStacks[i];
+						let sBlockHash = TextBlock.block_hash;
+						let oFound = oPretranslationArray[sBlockHash];
+						if (oFound)
+						{
+							g_MigrateTxNoStacks.splice(i, 1);
+						}
+					}
+
+					let j = g_MigrateTxRequest.text.length;
+					while (j--)
+					{
+						let TextBlock  = g_MigrateTxRequest.text[j];
+						let sBlockHash = TextBlock.block_hash;
+						let oFound = oPretranslationArray[sBlockHash];
+						if (oFound)
+						{
+							g_MigrateTxRequest.text.splice(j, 1);
+						}
+					}
+				}
+			} catch (e)
+			{
+				DebugLog (1, "OneLinkMoxieJS Migrate Data /Pretranslate failure", e, "");
+			}
+			SendMigrateData(sHost, sUrlHash);
+		},
+		failure: function (oXHR, oParms) {
+
+			DebugLog (1, "OneLinkMoxieJS Migrate Data /Pretranslate failure", "", "");
+			SendMigrateData(sHost, sUrlHash);
+
+		},
+		retry_count: 0
+	});
+
+} // ProcessMigrateData
+
+//-----------------------------------------------------------------------------
+function SendMigrateData(sHost, sUrlHash)
+//-----------------------------------------------------------------------------
+{
+
+	if (MoxieXapisShouldRefreshToken()) 
+	{
+		MoxieXapisToken(sHost, function() 
+		{
+			SendMigrateData(sHost, sUrlHash);
+		});
+		return;
+	}
+
 	let TxRequest = {
 		"url"              : document.location.href,
 		"content_url_hash" : sUrlHash,
@@ -17040,6 +17523,7 @@ function ProcessMigrateData(sHost)
 			method: "POST",
 			data: TxRequest,
 			contentType: "application/json",
+			requestHeaders: {"x-onelink-token": g_XAPISToken},
 			success: function (oXHR, oParms) {
 				DebugLog (1, "OneLinkMoxieJS Migrate Data /Translate success", "", "");
 	
@@ -17127,19 +17611,357 @@ function ProcessMigrateData(sHost)
 			retry_max_msecs: 20
 		});
 	}
-} // ProcessMigrateData
+} // SendMigrateData
+
+//-----------------------------------------------------------------------------
+function XapisAutoDetectTranslate(sTranslateKey, sHost, iOPEArrayIndex, bAssetsOnly)
+//-----------------------------------------------------------------------------
+{
+	if (MoxieXapisShouldRefreshToken()) 
+	{
+		MoxieXapisToken(sHost, function() 
+		{
+			XapisAutoDetectTranslate(sTranslateKey, sHost, iOPEArrayIndex, bAssetsOnly);
+		});
+		return;
+	}
+
+	// Copy global data from DOM walking into local arrays for /Translate call
+
+	let LocationArray  = g_AutoDetLocationArray;
+	let DomObjsArray   = g_AutoDetDomObjsArray;
+
+	let sUrlForHash = GetPathForHash();
+	let sUrlHash    = FNV1aHash(sUrlForHash.toLowerCase());
+
+	let TxRequest     = {
+			"url"              : document.location.href,
+			"content_url_hash" : sUrlHash, 
+			"text"             : g_TxAutoDetect
+		};
+
+	DebugLog (3, "OneLinkMoxieJS Auto Detect content found for /Translate", TxRequest, "");
+
+	// Clear global data for the next set of DOM walking
+
+	g_TxAutoDetect  = [];
+	g_AutoDetLocationArray = [];
+	g_AutoDetDomObjsArray  = [];
+
+	g_bAutoTransInProgress = true;
+
+	let nRequestSize = 0;
+	if (g_bStatsActive && g_bSendStats)
+	{
+		try {
+			// calculate size of request body in bytes
+			let sBody = JSON.stringify(TxRequest);
+			let c;
+			for(let i=0;c=sBody.charCodeAt(i++);nRequestSize+=c>>11?3:c>>7?2:1){}
+		} catch (e) {}
+	}
+
+	let ApiStat = {
+				    "api_name"         : "Translate",
+				    "body_size_bytes"  : nRequestSize,
+				    "roundtrip_usecs"  : 0,
+				    "processing_usecs" : 0
+				  };
+
+	DebugLog (1, "OneLinkMoxieJS calling /Translate for Auto Detect", "", "");
+
+	let bIsTranslation = true;
+	let bOneLinkTx     = true;  // value is not relevant. MoxieWalkDom will calculate what it is.
+	let bAutoDetect    = false; // value is not relevant. MoxieWalkDom will calculate what it is.
+
+	let nKjaxStart = window.performance.now();
+
+	k$jax ({
+		url: sHost + "xapis/Translate/" + sTranslateKey + "?auto_detect=1",
+		method: "POST",
+		data: TxRequest,
+		requestHeaders: {"x-onelink-token": g_XAPISToken},
+		contentType: "application/json",
+		success: function (oXHR, oParms) {
+			g_bAutoTransInProgress = false;
+
+			if (g_bStatsActive && g_bSendStats)
+			{
+				try {
+					let nTime = (window.performance.now() - nKjaxStart) * 1000;
+					ApiStat.roundtrip_usecs = Math.floor(nTime);
+				} catch (e) {}
+			}
+
+			DebugLog (1, "OneLinkMoxieJS Auto Detect /Translate success", "", "");
+
+			let nTxStart = window.performance.now();
+			MoxieProcessAjax (oXHR, LocationArray, DomObjsArray, TxRequest.text, iOPEArrayIndex, ApiStat, true);
+			let nTime = (window.performance.now() - nTxStart) * 1000;
+
+			if (!g_bTranslateInProgress)
+			{
+				document.documentElement.style.opacity=1;
+				document.documentElement.style.filter='alpha(opacity=100)';
+			}
+
+			if (g_bStatsActive && g_bSendStats)
+			{
+				try {
+					let nTime = (window.performance.now() - nTxStart) * 1000;
+					ApiStat.processing_usecs = Math.floor(nTime);
+					g_ApiStats.push(ApiStat);
+				} catch (e) {}
+			}
+
+			// If normal /Translate is in progress, it will handle the queue when it's done
+			if (!g_bTranslateInProgress && !g_bPretransInProgress)
+			{
+				if (g_TranslateObjQueue.length > 0)
+				{
+					DebugLog (1, "OneLinkMoxieJS walking queued DOM objects", "", "");
+
+					// Check if location changed via pushstate
+					let sMoxieLocation = GetPath();
+
+					let bUrlChanged = false;
+					if (sMoxieLocation != g_sMoxieLocation)
+					{
+						bUrlChanged = true;
+
+						if (g_bStatsActive)
+						{
+							MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
+							g_bSendStats = true;
+						}
+
+						// re-parse Translation Rules
+						// this will also reset global info like g_sMoxieLocation and g_bSendStats
+						MoxieSetupTranslateRules();
+
+						if (g_bIsOPE)
+						{           
+							// Tell OPE the document location has changed 
+							if (OPEEditor && (typeof OPEEditor.OPELocationChanged === "function"))
+							{           
+								try
+								{
+									OPEEditor.OPELocationChanged();
+								} 
+								catch (error) {}
+							}           
+						} 
+
+						if (g_bStatsActive)
+						{
+							MoxieStartStatsTimer(sTranslateKey, sHost);
+						}
+					}
+
+					let bPageInScope = IsPageInScope();
+					if (!bPageInScope)
+					{
+						// This page is now out of scope for this target config
+
+						ClearTranslateData();
+
+						return;
+					}
+
+					if (bUrlChanged)
+					{
+						// Re-Fetch the Pretranslate JSON for the new URL
+						ReFetchPretranslate(sTranslateKey, sHost, false, bAssetsOnly);
+					}
+					else
+					{
+						ProcessTransObjQueue(sTranslateKey, sHost, false, bAssetsOnly);
+					}
+				}
+				else
+				{
+					RemoveHideClasses();
+				}
+			}
+		},
+		failure: function (oXHR, oParms) {
+			g_bAutoTransInProgress = false;
+
+			if (g_bStatsActive && g_bSendStats)
+			{
+				try {
+					let nTime = (window.performance.now() - nKjaxStart) * 1000;
+					ApiStat.roundtrip_usecs = Math.floor(nTime);
+					g_ApiStats.push(ApiStat);
+				} catch (e) {}
+			}
+
+			DebugLog (1, "OneLinkMoxieJS Auto Detect /Translate failure", "", "");
+
+			// If normal /Translate is in progress, it will handle the queue when it's done
+			if (!g_bTranslateInProgress && !g_bPretransInProgress)
+			{
+				document.documentElement.style.opacity=1;
+				document.documentElement.style.filter='alpha(opacity=100)';
+
+				if (g_TranslateObjQueue.length > 0)
+				{
+					DebugLog (1, "OneLinkMoxieJS walking queued DOM objects", "", "");
+
+					// Check if location changed via pushstate
+					let sMoxieLocation = GetPath();
+
+					let bUrlChanged = false;
+					if (sMoxieLocation != g_sMoxieLocation)
+					{
+						bUrlChanged = true;
+
+						if (g_bStatsActive)
+						{
+							MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
+							g_bSendStats = true;
+						}
+
+						// re-parse Translation Rules
+						// this will also reset global info like g_sMoxieLocation and g_bSendStats
+						MoxieSetupTranslateRules();
+
+						if (g_bIsOPE)
+						{           
+							// Tell OPE the document location has changed 
+							if (OPEEditor && (typeof OPEEditor.OPELocationChanged === "function"))
+							{           
+								try
+								{
+									OPEEditor.OPELocationChanged();
+								} 
+								catch (error) {}
+							}           
+						} 
+
+						if (g_bStatsActive)
+						{
+							MoxieStartStatsTimer(sTranslateKey, sHost);
+						}
+					}
+
+					let bPageInScope = IsPageInScope();
+					if (!bPageInScope)
+					{
+						// This page is now out of scope for this target config
+
+						ClearTranslateData();
+
+						return;
+					}
+
+					if (bUrlChanged)
+					{
+						// Re-Fetch the Pretranslate JSON for the new URL
+						ReFetchPretranslate(sTranslateKey, sHost, false, bAssetsOnly);
+					}
+					else
+					{
+						ProcessTransObjQueue(sTranslateKey, sHost, false, bAssetsOnly);
+					}
+				}
+				else
+				{
+					RemoveHideClasses();
+				}
+			}
+		},
+		retry_status: [0],
+		retry_count: 1,
+		retry_min_msecs: 1,
+		retry_max_msecs: 20
+	});
+
+} // XapisAutoDetectTranslate
+
+//-----------------------------------------------------------------------------
+function MoxieXapisShouldRefreshToken()
+//-----------------------------------------------------------------------------
+{
+
+	if (!g_XAPISToken || !g_XAPISTokenDate || (new Date() >= new Date(g_XAPISTokenDate.getTime() + g_XAPISTokenInterval)))
+	{
+		return true;
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+function MoxieXapisToken(sHost, callback)
+//-----------------------------------------------------------------------------
+{
+	g_XAPISTokenDate = new Date();
+
+	k$jax ({
+		url: sHost + "xapis/Token/",
+		method: "POST",
+		contentType: "application/json",
+		success: function MoxieXapisTokenSuccess(oXHR)
+		{
+			if ((oXHR.status < 200) || (oXHR.status > 299))
+			{
+				console.error ("OneLinkMoxieJS error from XAPIS /Token HTTP-" + oXHR.status, oXHR.statusText, oXHR.responseText);
+				return;
+			}
+		
+			let oJSON = null;
+			try
+			{
+				oJSON = JSON.parse(oXHR.responseText);
+			}
+			catch (e)
+			{
+				console.error ("OneLinkMoxieJS INVALID JSON FROM XAPIS", oXHR.responseText, e);
+				return;
+			}
+			g_XAPISToken = oJSON.token;
+			callback && callback();
+		},
+		failure: function MoxieXapisTokenFailure()
+		{
+			DebugLog (1, "OneLinkMoxieJS /Token failure", "", "");
+		},
+		retry_status: [0],
+		retry_count: 5,
+		retry_min_msecs: 1,
+		retry_max_msecs: 20
+	});
+} // MoxieXapisToken
 
 //-----------------------------------------------------------------------------
 function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks, bAssetsOnly)
 //-----------------------------------------------------------------------------
 {
+	if (MoxieXapisShouldRefreshToken()) 
+	{
+		MoxieXapisToken(sHost, function() 
+		{
+			MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks, bAssetsOnly);
+		});
+		return;
+	}
+	
+	if (g_TxAutoDetect.length > 0)
+	{
+		XapisAutoDetectTranslate (sTranslateKey, sHost, iOPEArrayIndex, bAssetsOnly);
+	}
+
 	if (g_TxRequest.text.length == 0)
 	{
-		g_bTranslateInProgress         = false;
-		document.documentElement.style.opacity=1;
-		document.documentElement.style.filter='alpha(opacity=100)';
+		g_bTranslateInProgress = false;
 
-		RemoveHideClasses();
+		if (!g_bAutoTransInProgress)
+		{
+			document.documentElement.style.opacity=1;
+			document.documentElement.style.filter='alpha(opacity=100)';
+
+			RemoveHideClasses();
+		}
 
 		if (g_nMoxiePageStart != 0)
 		{
@@ -17153,7 +17975,7 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 
 		MoxiePageDone();
 
-		DebugLog (1, "OneLinkMoxieJS no content found for translation", g_TxNoStacks, "");
+		DebugLog (1, "OneLinkMoxieJS no content found for Standard /Translate", g_TxNoStacks, "");
 
 		if (g_bInMigrateMode)
 		{
@@ -17185,12 +18007,12 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 
 	DebugLog (3, "OneLinkMoxieJS content found for /Translate", TxRequest, "");
 
-	let oRequestHeaders = {};
+	let oRequestHeaders = {"x-onelink-token": g_XAPISToken};
 
 	if (g_bIsGLNOW)
 	{
 		TxRequest.user_key = g_sGLNOWUser;
-		oRequestHeaders    = {"Authorization":"Bearer " + g_sOAuthToken};
+		oRequestHeaders["Authorization"] =  "Bearer " + g_sOAuthToken;
 	}
 
 	// Clear global data for the next set of DOM walking
@@ -17206,7 +18028,8 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 	g_bTranslateInProgress = true;
 
 	let bIsTranslation = true;
-	let bOneLinkTx     = true;
+	let bOneLinkTx     = true;  // value is not relevant. MoxieWalkDom will calculate what it is.
+	let bAutoDetect    = false; // value is not relevant. MoxieWalkDom will calculate what it is.
 
 	let nRequestSize = 0;
 	if (g_bStatsActive && g_bSendStats)
@@ -17223,8 +18046,11 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 	{
 		g_bTranslateInProgress = false;
 
-		document.documentElement.style.opacity=1;
-		document.documentElement.style.filter='alpha(opacity=100)';
+		if (!g_bAutoTransInProgress)
+		{
+			document.documentElement.style.opacity=1;
+			document.documentElement.style.filter='alpha(opacity=100)';
+		}
 
 		if (g_nMoxiePageStart != 0)
 		{
@@ -17233,74 +18059,72 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 			g_nMoxiePageStart = 0;
 		}
 
-		if (g_TranslateObjQueue.length > 0)
+		// If /Translate for Auto Detect is in progress, it will handle the queue when it's done
+		if (!g_bAutoTransInProgress && !g_bPretransInProgress)
 		{
-			// Check if location changed via pushstate
-			let sMoxieLocation = GetPath();
-
-			if (sMoxieLocation != g_sMoxieLocation)
+			if (g_TranslateObjQueue.length > 0)
 			{
-				if (g_bStatsActive)
+				// Check if location changed via pushstate
+				let sMoxieLocation = GetPath();
+
+				let bUrlChanged = false;
+				if (sMoxieLocation != g_sMoxieLocation)
 				{
-					MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
-					g_bSendStats = true;
-				}
+					bUrlChanged = true;
 
-				// re-parse Translation Rules
-				// this will also reset global info like g_sMoxieLocation and g_bSendStats
-				MoxieSetupTranslateRules();
-
-				if (g_bStatsActive)
-				{
-					MoxieStartStatsTimer(sTranslateKey, sHost);
-				}
-			}
-
-			let bPageInScope = IsPageInScope();
-			if (!bPageInScope)
-			{
-				// This page is now out of scope for this target config
-
-				ClearTranslateData();
-
-				return;
-			}
-
-			// Starting position in global OPE Array for data from this translation request
-			iOPEArrayIndex = g_OPEArray.length;
-
-			g_OPEBlocksForSegments = [];
-
-			for (let i=0; i<g_TranslateObjQueue.length; i++)
-			{
-				let oNextTopObj = g_TranslateObjQueue[i];
-				if (oNextTopObj.parentNode ||
-				    ((oNextTopObj.nodeType == 2/*ATTR*/) && oNextTopObj.ownerElement) ||
-				    ((oNextTopObj.nodeType == 11/*FRAGMENT*/) && oNextTopObj.host))
-				{
-					// If it doesn't have a parent, it's not in the DOM anymore
-					MoxieWalkDOM (bIsTranslation, bOneLinkTx, "", oNextTopObj, bAssetsOnly, sTranslateKey, sHost);
-				}
-			}
-			g_TranslateObjQueue = [];
-
-			if (g_bIsOPE)
-			{
-				if (g_OPEBlocksForSegments.length > 0)
-				{
-					if (typeof GetSegmentsOPE === "function")
+					if (g_bStatsActive)
 					{
-						GetSegmentsOPE(g_OPEBlocksForSegments);
+						MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
+						g_bSendStats = true;
 					}
-					g_OPEBlocksForSegments = [];
+
+					// re-parse Translation Rules
+					// this will also reset global info like g_sMoxieLocation and g_bSendStats
+					MoxieSetupTranslateRules();
+
+					if (g_bIsOPE)
+					{           
+						// Tell OPE the document location has changed 
+						if (OPEEditor && (typeof OPEEditor.OPELocationChanged === "function"))
+						{           
+							try
+							{
+								OPEEditor.OPELocationChanged();
+							} 
+							catch (error) {}
+						}           
+					} 
+
+					if (g_bStatsActive)
+					{
+						MoxieStartStatsTimer(sTranslateKey, sHost);
+					}
+				}
+
+				let bPageInScope = IsPageInScope();
+				if (!bPageInScope)
+				{
+					// This page is now out of scope for this target config
+
+					ClearTranslateData();
+
+					return;
+				}
+
+				if (bUrlChanged)
+				{
+					// Re-Fetch the Pretranslate JSON for the new URL
+					ReFetchPretranslate(sTranslateKey, sHost, false, bAssetsOnly);
+				}
+				else
+				{
+					ProcessTransObjQueue(sTranslateKey, sHost, false, bAssetsOnly);
 				}
 			}
-
-			MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, false, bAssetsOnly);
-		}
-		else
-		{
-			RemoveHideClasses();
+			else
+			{
+				RemoveHideClasses();
+			}
 		}
 
 		if (bRewriteLinks) {
@@ -17351,12 +18175,8 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 			if (g_sTxMethod != "AMI")
 			{
 				let nTxStart = window.performance.now();
-				MoxieProcessAjax (oXHR, LocationArray, DomObjsArray, TxRequest.text, iOPEArrayIndex, ApiStat);
+				MoxieProcessAjax (oXHR, LocationArray, DomObjsArray, TxRequest.text, iOPEArrayIndex, ApiStat, false);
 				let nTime = (window.performance.now() - nTxStart) * 1000;
-				if (g_QAStats.apply_trans_secs == 0)
-				{
-					g_QAStats.apply_trans_secs = Math.floor(nTime);
-				}
 
 				if (g_bStatsActive && g_bSendStats)
 				{
@@ -17367,8 +18187,11 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 				}
 			}
 
-			document.documentElement.style.opacity=1;
-			document.documentElement.style.filter='alpha(opacity=100)';
+			if (!g_bAutoTransInProgress)
+			{
+				document.documentElement.style.opacity=1;
+				document.documentElement.style.filter='alpha(opacity=100)';
+			}
 
 			if (g_nMoxiePageStart != 0)
 			{
@@ -17386,76 +18209,74 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 
 			g_bTranslateInProgress = false;
 
-			if (g_TranslateObjQueue.length > 0)
+			// If /Translate for Auto Detect is in progress, it will handle the queue when it's done
+			if (!g_bAutoTransInProgress && !g_bPretransInProgress)
 			{
-				DebugLog (1, "OneLinkMoxieJS walking queued DOM objects", "", "");
-
-				// Check if location changed via pushstate
-				let sMoxieLocation = GetPath();
-
-				if (sMoxieLocation != g_sMoxieLocation)
+				if (g_TranslateObjQueue.length > 0)
 				{
-					if (g_bStatsActive)
+					DebugLog (1, "OneLinkMoxieJS walking queued DOM objects", "", "");
+
+					// Check if location changed via pushstate
+					let sMoxieLocation = GetPath();
+
+					let bUrlChanged = false;
+					if (sMoxieLocation != g_sMoxieLocation)
 					{
-						MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
-						g_bSendStats = true;
-					}
+						bUrlChanged = true;
 
-					// re-parse Translation Rules
-					// this will also reset global info like g_sMoxieLocation and g_bSendStats
-					MoxieSetupTranslateRules();
-
-					if (g_bStatsActive)
-					{
-						MoxieStartStatsTimer(sTranslateKey, sHost);
-					}
-				}
-
-				let bPageInScope = IsPageInScope();
-				if (!bPageInScope)
-				{
-					// This page is now out of scope for this target config
-
-					ClearTranslateData();
-
-					return;
-				}
-
-				// Starting position in global OPE Array for data from this translation request
-				iOPEArrayIndex = g_OPEArray.length;
-
-				g_OPEBlocksForSegments = [];
-
-				for (let i=0; i<g_TranslateObjQueue.length; i++)
-				{
-					let oNextTopObj = g_TranslateObjQueue[i];
-					if (oNextTopObj.parentNode ||
-					    ((oNextTopObj.nodeType == 2/*ATTR*/) && oNextTopObj.ownerElement) ||
-					    ((oNextTopObj.nodeType == 11/*FRAGMENT*/) && oNextTopObj.host))
-					{
-						// If it doesn't have a parent, it's not in the DOM anymore
-						MoxieWalkDOM (bIsTranslation, bOneLinkTx, "", oNextTopObj, bAssetsOnly, sTranslateKey, sHost);
-					}
-				}
-				g_TranslateObjQueue = [];
-
-				if (g_bIsOPE)
-				{
-					if (g_OPEBlocksForSegments.length > 0)
-					{
-						if (typeof GetSegmentsOPE === "function")
+						if (g_bStatsActive)
 						{
-							GetSegmentsOPE(g_OPEBlocksForSegments);
+							MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
+							g_bSendStats = true;
 						}
-						g_OPEBlocksForSegments = [];
+
+						// re-parse Translation Rules
+						// this will also reset global info like g_sMoxieLocation and g_bSendStats
+						MoxieSetupTranslateRules();
+
+						if (g_bIsOPE)
+						{           
+							// Tell OPE the document location has changed 
+							if (OPEEditor && (typeof OPEEditor.OPELocationChanged === "function"))
+							{           
+								try
+								{
+									OPEEditor.OPELocationChanged();
+								} 
+								catch (error) {}
+							}           
+						} 
+
+						if (g_bStatsActive)
+						{
+							MoxieStartStatsTimer(sTranslateKey, sHost);
+						}
+					}
+
+					let bPageInScope = IsPageInScope();
+					if (!bPageInScope)
+					{
+						// This page is now out of scope for this target config
+
+						ClearTranslateData();
+
+						return;
+					}
+
+					if (bUrlChanged)
+					{
+						// Re-Fetch the Pretranslate JSON for the new URL
+						ReFetchPretranslate(sTranslateKey, sHost, false, bAssetsOnly);
+					}
+					else
+					{
+						ProcessTransObjQueue(sTranslateKey, sHost, false, bAssetsOnly);
 					}
 				}
-
-				MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, false, bAssetsOnly);
-			}
-			else
-			{
-				RemoveHideClasses();
+				else
+				{
+					RemoveHideClasses();
+				}
 			}
 
 			if (bRewriteLinks) {
@@ -17472,8 +18293,11 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 				} catch (e) {}
 			}
 
-			document.documentElement.style.opacity=1;
-			document.documentElement.style.filter='alpha(opacity=100)';
+			if (!g_bAutoTransInProgress)
+			{
+				document.documentElement.style.opacity=1;
+				document.documentElement.style.filter='alpha(opacity=100)';
+			}
 
 			if (g_nMoxiePageStart != 0)
 			{
@@ -17488,81 +18312,83 @@ function MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, bRewriteLinks
 
 			g_bTranslateInProgress = false;
 
-			if (g_TranslateObjQueue.length > 0)
+			if (g_bIsOPE)
 			{
-				DebugLog (1, "OneLinkMoxieJS walking queued DOM objects", "", "");
-
-				// Check if location changed via pushstate
-				let sMoxieLocation = GetPath();
-
-				if (sMoxieLocation != g_sMoxieLocation)
+				// Show Error Message in OPE Mode
+				if (OPEEditor && (typeof OPEEditor.ShowServerError === "function"))
 				{
-					if (g_bStatsActive)
-					{
-						MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
-						g_bSendStats = true;
-					}
-
-					// re-parse Translation Rules
-					// this will also reset global info like g_sMoxieLocation and g_bSendStats
-					MoxieSetupTranslateRules();
-
-					if (g_bStatsActive)
-					{
-						MoxieStartStatsTimer(sTranslateKey, sHost);
-					}
+					OPEEditor.ShowServerError(oXHR.responseText);
 				}
-
-				let bPageInScope = IsPageInScope();
-				if (!bPageInScope)
-				{
-					// This page is now out of scope for this target config
-
-					ClearTranslateData();
-
-					return;
-				}
-
-				// Starting position in global OPE Array for data from this translation request
-				iOPEArrayIndex = g_OPEArray.length;
-
-				g_OPEBlocksForSegments = [];
-
-				for (let i=0; i<g_TranslateObjQueue.length; i++)
-				{
-					let oNextTopObj = g_TranslateObjQueue[i];
-					if (oNextTopObj.parentNode ||
-					    ((oNextTopObj.nodeType == 2/*ATTR*/) && oNextTopObj.ownerElement) ||
-					    ((oNextTopObj.nodeType == 11/*FRAGMENT*/) && oNextTopObj.host))
-					{
-						// If it doesn't have a parent, it's not in the DOM anymore
-						MoxieWalkDOM (bIsTranslation, bOneLinkTx, "", oNextTopObj, bAssetsOnly, sTranslateKey, sHost);
-					}
-				}
-				g_TranslateObjQueue = [];
-
-				if (g_bIsOPE)
-				{
-					// Show Error Message in OPE Mode
-					if (OPEEditor && (typeof OPEEditor.ShowServerError === "function"))
-					{
-						OPEEditor.ShowServerError(oXHR.responseText);
-					}
-					if (g_OPEBlocksForSegments.length > 0)
-					{
-						if (typeof GetSegmentsOPE === "function")
-						{
-							GetSegmentsOPE(g_OPEBlocksForSegments);
-						}
-						g_OPEBlocksForSegments = [];
-					}
-				}
-
-				MoxieXapisTranslate(sTranslateKey, sHost, iOPEArrayIndex, false, bAssetsOnly);
 			}
-			else
+
+			// If /Translate for Auto Detect is in progress, it will handle the queue when it's done
+			if (!g_bAutoTransInProgress && !g_bPretransInProgress)
 			{
-				RemoveHideClasses();
+				if (g_TranslateObjQueue.length > 0)
+				{
+					DebugLog (1, "OneLinkMoxieJS walking queued DOM objects", "", "");
+
+					// Check if location changed via pushstate
+					let sMoxieLocation = GetPath();
+
+					let bUrlChanged = false;
+					if (sMoxieLocation != g_sMoxieLocation)
+					{
+						bUrlChanged = true;
+
+						if (g_bStatsActive)
+						{
+							MoxieSendStats (sTranslateKey, sHost, g_sMoxieLocation);
+							g_bSendStats = true;
+						}
+
+						// re-parse Translation Rules
+						// this will also reset global info like g_sMoxieLocation and g_bSendStats
+						MoxieSetupTranslateRules();
+
+						if (g_bIsOPE)
+						{           
+							// Tell OPE the document location has changed 
+							if (OPEEditor && (typeof OPEEditor.OPELocationChanged === "function"))
+							{           
+								try
+								{
+									OPEEditor.OPELocationChanged();
+								} 
+								catch (error) {}
+							}           
+						} 
+
+						if (g_bStatsActive)
+						{
+							MoxieStartStatsTimer(sTranslateKey, sHost);
+						}
+					}
+
+					let bPageInScope = IsPageInScope();
+					if (!bPageInScope)
+					{
+						// This page is now out of scope for this target config
+
+						ClearTranslateData();
+
+						return;
+					}
+
+					if (bUrlChanged)
+					{
+						// Re-Fetch the Pretranslate JSON for the new URL
+						ReFetchPretranslate(sTranslateKey, sHost, false, bAssetsOnly);
+					}
+					else
+					{
+						ProcessTransObjQueue(sTranslateKey, sHost, false, bAssetsOnly);
+					}
+				}
+				else
+				{
+					RemoveHideClasses();
+				}
 			}
 
 			if (bRewriteLinks) {
@@ -17680,7 +18506,7 @@ function GetOneLinkTxState (obj, NoTxReason)
 	if (obj.nodeType == 1/*ELEMENT*/)
 	{
 		let TranslateAttribute = obj.getAttribute("translate");
-		if (ClassListContains(obj, "OneLinkTx") || ClassListContains(obj, "OneLinkOPETx"))
+		if (ClassListContains(obj, "OneLinkTx"))
 		{
 			NoTxReason.reason = "";
 			return true;
@@ -17702,17 +18528,29 @@ function GetOneLinkTxState (obj, NoTxReason)
 		}
 	}
 
-	let oParent = obj.parentNode;
-	if (!oParent && (obj.nodeType == 11))
+	let oParent = null;
+	if (obj.nodeType == 11)
 	{
 		oParent = obj.host;
+	}
+	else if (obj.nodeType == 2)
+	{
+		oParent = obj.ownerElement;
+	}
+	else if (obj.assignedSlot)
+	{
+		oParent = obj.assignedSlot;
+	}
+	else
+	{
+		oParent = obj.parentNode;
 	}
 	while (oParent != null)
 	{
 		if (oParent.nodeType == 1/*ELEMENT*/)
 		{
 			let TranslateAttribute = oParent.getAttribute("translate");
-			if (ClassListContains(oParent, "OneLinkTx") || ClassListContains(oParent, "OneLinkOPETx"))
+			if (ClassListContains(oParent, "OneLinkTx"))
 			{
 				NoTxReason.reason = "";
 				return true;
@@ -17737,6 +18575,10 @@ function GetOneLinkTxState (obj, NoTxReason)
 		{
 			oParent = oParent.host;
 		}
+		else if (oParent.assignedSlot)
+		{
+			oParent = oParent.assignedSlot;
+		}
 		else
 		{
 			oParent = oParent.parentNode;
@@ -17745,6 +18587,62 @@ function GetOneLinkTxState (obj, NoTxReason)
 	return true;
 
 } // GetOneLinkTxState
+
+//-----------------------------------------------------------------------------
+function GetOneLinkAutoState (obj)
+//-----------------------------------------------------------------------------
+{
+	if (obj.nodeType == 1/*ELEMENT*/)
+	{
+		if (ClassListContains(obj, "OneLinkAuto"))
+		{
+			return true;
+		}
+	}
+
+	let oParent = null;
+	if (obj.nodeType == 11)
+	{
+		oParent = obj.host;
+	}
+	else if (obj.nodeType == 2)
+	{
+		oParent = obj.ownerElement;
+	}
+	else if (obj.assignedSlot)
+	{
+		oParent = obj.assignedSlot;
+	}
+	else
+	{
+		oParent = obj.parentNode;
+	}
+
+	while (oParent != null)
+	{
+		if (oParent.nodeType == 1/*ELEMENT*/)
+		{
+			if (ClassListContains(oParent, "OneLinkAuto"))
+			{
+				return true;
+			}
+		}
+		if (oParent.nodeType == 11)
+		{
+			oParent = oParent.host;
+		}
+		else if (oParent.assignedSlot)
+		{
+			oParent = oParent.assignedSlot;
+		}
+		else
+		{
+			oParent = oParent.parentNode;
+		}
+	}
+	return false;
+
+} // GetOneLinkAutoState
 
 //-----------------------------------------------------------------------------
 function MoxieReverseWalkDOM (obj, sTagStack, sIdStack, sClassStack)
@@ -17756,18 +18654,23 @@ function MoxieReverseWalkDOM (obj, sTagStack, sIdStack, sClassStack)
 		sIdStack = "/";
 		sClassStack = "/";
 
-		let oParent = obj.parentNode;
+		let oParent = null;
 
-		if (!oParent)
+		if ((obj.nodeType == 2/*ATTR*/) && obj.ownerElement)
 		{
-			if ((obj.nodeType == 2/*ATTR*/) && obj.ownerElement)
-			{
-				oParent = obj.ownerElement;
-			}
-			else if ((obj.nodeType == 11/*FRAGMENT*/) && obj.host)
-			{
-				oParent = obj.host;
-			}
+			oParent = obj.ownerElement;
+		}
+		else if ((obj.nodeType == 11/*FRAGMENT*/) && obj.host)
+		{
+			oParent = obj.host;
+		}
+		else if (obj.assignedSlot)
+		{
+			oParent = obj.assignedSlot;
+		}
+		else
+		{
+			oParent = obj.parentNode;
 		}
 
 		if (oParent && (oParent !== document))
@@ -17824,6 +18727,17 @@ function MoxieReverseWalkDOM (obj, sTagStack, sIdStack, sClassStack)
 			}
 		}
 		sClassStack += "/";
+	}
+
+	// Note that we treat shadow roots and slots as Blocks
+	// So here we always look at obj.parentNode and do NOT look at obj.assignedSlot or obj.host
+	// Our logic in MoxieReplaceLocation cannot handle and reconstruct a block translation that would contain
+	// a shadow-root or assignedSlot since they are NOT parent/child relationships
+
+	if (obj.assignedSlot)
+	{
+		// this is in a slot, just return obj
+		return obj;
 	}
 
 	let BlockObj = obj;
@@ -17888,11 +18802,20 @@ function InsideNonText (obj)
 		return true;
 	}
 
-	let oParent = obj.parentNode;
-	if (!oParent && (obj.nodeType == 11))
+	let oParent = null;
+	if (obj.nodeType == 11)
 	{
 		oParent = obj.host;
 	}
+	else if (obj.assignedSlot)
+	{
+		oParent = obj.assignedSlot;
+	}
+	else
+	{
+		oParent = obj.parentNode;
+	}
+
 	if (oParent)
 	{
 		return InsideNonText(oParent);
@@ -17981,7 +18904,9 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 
 							MoxieGetTICs(obj, TicValues);
 
-							ProcessImageAssets(true, obj, TicValues.tag_stack, TicValues.id_stack, TicValues.class_stack, false);
+							let bAutoDetect = GetOneLinkAutoState(obj) || MatchAutoDetectTIC(TicValues.tag_stack, TicValues.id_stack, TicValues.class_stack, obj);
+
+							ProcessImageAssets(true, obj, TicValues.tag_stack, TicValues.id_stack, TicValues.class_stack, false, bAutoDetect);
 						}
 					}
 				});
@@ -18038,7 +18963,7 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 								}
 							}
 
-							if (oNewObject.parentNode && !IsNonText (oNewObject))
+							if ((oNewObject.parentNode || oNewObject.assignedSlot || oNewObject.host) && !IsNonText (oNewObject))
 							{
 								if ((g_sTxMethod != "AMI") && (g_sTxMethod != "STATSONLY") && !g_bIsGLNOW)
 								{
@@ -18087,12 +19012,12 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 							let sEmptyCheck = oNewObject.nodeValue.trim();
 							if (sEmptyCheck != "")
 							{
-								let iTransIndex = g_TranslatedText.indexOf(oNewObject.nodeValue);
-								if ((iTransIndex === -1) && (oNewObject.nodeValue !== oNewObject.moxietx))
+								if (oNewObject.nodeValue !== oNewObject.moxietx)
 								{
-									if (oNewObject.parentNode && !InsideNonText (oNewObject.parentNode))
+									let oParent = oNewObject.assignedSlot || oNewObject.parentNode || oNewObject.host;
+									if (oParent && !InsideNonText (oParent))
 									{
-										if (g_bIsOPE && oNewObject.parentNode.classList.contains("OPE_object_tag"))
+										if (g_bIsOPE && oParent.classList.contains("OPE_object_tag"))
 										{
 											continue; // for
 										}
@@ -18101,7 +19026,7 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 										let bOneLinkTx = GetOneLinkTxState(oNewObject, NoTxReason);
 										if (bOneLinkTx)
 										{
-											if (!oNewObject.moxiesrctext || g_TranslatedText.indexOf(oNewObject.moxiesrctext) !== -1)   /// May NOT want this check
+											if (!oNewObject.moxiesrctext || (oNewObject.nodeValue !== oNewObject.moxiesrctext))
 											{
 												if (g_bHideDynamicContent && (g_sTxMethod != "AMI") && (g_sTxMethod != "STATSONLY") && !g_bIsGLNOW)
 												{
@@ -18132,9 +19057,7 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 												let sIdStack = "/";
 												let sClassStack = "/";
 
-												let oParent = oNewObject.parentNode;
-
-												if (oParent && (oParent !== document))
+												if (oParent !== document)
 												{
 													let TicValues = {
 														"tag_stack" : "/",
@@ -18163,9 +19086,9 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 		 											(sTagStack.indexOf("OPE-SPAN") == -1))
 												{
 													let iChildCount = 0;
-													for (let ii = 0; ii < oNewObject.parentNode.childNodes.length; ++ii)
+													for (let ii = 0; ii < oParent.childNodes.length; ++ii)
 													{
-														let oChild = oNewObject.parentNode.childNodes[ii];
+														let oChild = oParent.childNodes[ii];
 														if (!IsNonText (oChild) && (oChild.nodeType != 8))
 														{
 															iChildCount++;
@@ -18175,7 +19098,7 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 													if (iChildCount == 1)
 													{
 														// this text node is the only relevant child, hook the parent
-														HookNoTx (oNewObject.parentNode, sTagStack, sIdStack, sClassStack, NoTxReason.reason);
+														HookNoTx (oParent, sTagStack, sIdStack, sClassStack, NoTxReason.reason);
 													}
 													else
 													{
@@ -18200,30 +19123,30 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 							let sEmptyCheck = oNewObject.nodeValue.trim();
 							if (sEmptyCheck != "")
 							{
-								let iTransIndex = g_TranslatedText.indexOf(oNewObject.nodeValue);
-								if ((iTransIndex === -1) && (oNewObject.nodeValue !== oNewObject.moxietx))
+								if (oNewObject.nodeValue !== oNewObject.moxietx)
 								{
-									if (oNewObject.parentNode && !InsideNonText (oNewObject.parentNode))
+									let oParent = oNewObject.assignedSlot || oNewObject.parentNode || oNewObject.host;
+									if (oParent && !InsideNonText (oParent))
 									{
-										if (!g_bIsOPE || !oNewObject.parentNode.classList.contains("OPE_object_tag"))
+										if (!g_bIsOPE || !oParent.classList.contains("OPE_object_tag"))
 										{
 											let NoTxReason = {"reason":""};
 											let bOneLinkTx = GetOneLinkTxState(oNewObject, NoTxReason);
 											if (bOneLinkTx)
 											{
-												if (!oNewObject.moxiesrctext || (g_TranslatedText.indexOf(oNewObject.moxiesrctext) !== -1))
+												if (!oNewObject.moxiesrctext || (oNewObject.nodeValue !== oNewObject.moxiesrctext))
 												{
 													if (g_bHideDynamicContent && (g_sTxMethod != "AMI") && (g_sTxMethod != "STATSONLY") && !g_bIsGLNOW)
 													{
 														oNewObject.moxiesrctext = oNewObject.nodeValue;
 														oNewObject.nodeValue = "";
 													}
-	
+
 													if (g_bStatsActive && g_bSendStats)
 													{
 														g_GlobalStats.num_mutation_events += 1;
 													}
-	
+
 													let BlockObject = MoxieReverseWalkDOM(oNewObject);
 													// Only add object if it's not already on the list 
 													if (g_TranslateObjQueue.indexOf(BlockObject) === -1)
@@ -18242,9 +19165,7 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 													let sIdStack = "/";
 													let sClassStack = "/";
 	
-													let oParent = oNewObject.parentNode;
-	
-													if (oParent && (oParent !== document))
+													if (oParent !== document)
 													{
 														let TicValues = {
 															"tag_stack" : "/",
@@ -18273,9 +19194,9 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 			 											(sTagStack.indexOf("OPE-SPAN") == -1))
 													{
 														let iChildCount = 0;
-														for (let ii = 0; ii < oNewObject.parentNode.childNodes.length; ++ii)
+														for (let ii = 0; ii < oParent.childNodes.length; ++ii)
 														{
-															let oChild = oNewObject.parentNode.childNodes[ii];
+															let oChild = oParent.childNodes[ii];
 															if (!IsNonText (oChild) && (oChild.nodeType != 8))
 															{
 																iChildCount++;
@@ -18285,7 +19206,7 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 														if (iChildCount == 1)
 														{
 															// this text node is the only relevant child, hook the parent
-															HookNoTx (oNewObject.parentNode, sTagStack, sIdStack, sClassStack, NoTxReason.reason);
+															HookNoTx (oParent, sTagStack, sIdStack, sClassStack, NoTxReason.reason);
 														}
 														else
 														{
@@ -18323,8 +19244,7 @@ function MoxieWatchDOM (sTranslateKey, sHost)
 									let attrNode = obj.getAttributeNode(sAttr);
 									if (attrNode)
 									{
-										let iTransIndex = g_TranslatedText.indexOf(attrNode.value);
-										if ((iTransIndex === -1) && (attrNode.value !== attrNode.moxietx))
+										if (attrNode.value !== attrNode.moxietx)
 										{
 											if (g_bStatsActive && g_bSendStats)
 											{
@@ -18501,8 +19421,7 @@ function MoxieWatchInputValue (obj, sTranslateKey, sHost)
 			{
 				let oldValue = this[property];
 				descriptor.set.apply(this, arguments);
-				let iTransIndex   = g_TranslatedText.indexOf(obj.value);
-				if ((iTransIndex === -1 ) && (obj.value !== obj.moxietx))
+				if (obj.value !== obj.moxietx)
 				{
 					MoxieTranslate(sTranslateKey, sHost, obj);
 				}
@@ -18662,6 +19581,30 @@ function MoxieRewriteMetaRefresh()
 } // MoxieRewriteMetaRefresh
 
 //-----------------------------------------------------------------------------
+function ApplyCustomStyles ()
+//-----------------------------------------------------------------------------
+{
+	if (g_sCustomCss != "")
+	{
+		let oStyle = document.createElement ("style");
+		oStyle.innerHTML = g_sCustomCss;
+		document.head.appendChild (oStyle);
+	}
+} // ApplyCustomStyles
+
+//-----------------------------------------------------------------------------
+function ApplyCustomJs ()
+//-----------------------------------------------------------------------------
+{
+	if (g_sCustomJs != "")
+	{
+		let oScript = document.createElement ("script");
+		oScript.innerHTML = g_sCustomJs;
+		document.head.appendChild (oScript);
+	}
+} // ApplyCustomJs
+
+//-----------------------------------------------------------------------------
 function MoxieCustomStyles (sBlock)
 //-----------------------------------------------------------------------------
 {
@@ -18670,9 +19613,7 @@ function MoxieCustomStyles (sBlock)
 		let sEmptyCheck = sBlock.trim();
 		if (sEmptyCheck != "")
 		{
-			let oStyle = document.createElement ("style");
-			oStyle.innerHTML = sBlock;
-			document.head.appendChild (oStyle);
+			g_sCustomCss = sBlock;
 		}
 	}
 
@@ -18687,9 +19628,7 @@ function MoxieCustomJs (sBlock)
 		let sEmptyCheck = sBlock.trim();
 		if (sEmptyCheck != "")
 		{
-			let oScript = document.createElement ("script");
-			oScript.innerHTML = sBlock;
-			document.head.appendChild (oScript);
+			g_sCustomJs = sBlock;
 		}
 	}
 
@@ -18865,10 +19804,13 @@ function AdjustPath(sPath)
 // ============================================================================
 
 //-----------------------------------------------------------------------------
-function LangSelected()
+function LangSelected(sLangSelection)
 //-----------------------------------------------------------------------------
 {
-	var sLangSelection = document.getElementById("OLJSLanguageSelector").value;
+	if (!sLangSelection)
+	{
+		sLangSelection = document.getElementById("OLJSLanguageSelector").value;
+	}
 	if (sLangSelection)
 	{
 		if (g_sDeploymentMethod == "domain")
@@ -19021,7 +19963,7 @@ function LangSelected()
 } // LangSelected
 
 //-----------------------------------------------------------------------------
-function InsertLangSelector(obj, sPosition)
+function InsertLangSelector(obj, Position)
 //-----------------------------------------------------------------------------
 {
 	if (obj)
@@ -19071,63 +20013,198 @@ function InsertLangSelector(obj, sPosition)
 			return;
 		}
 
-		let oSelect = document.createElement("select");
-
-		oSelect.id        = "OLJSLanguageSelector";
-		oSelect.className = "OneLinkNoTx OLJS-language-selector";
-
-		let bSelectedOption = false;
-		let bDefaultExists  = false;
-
-		if (!g_LangSelectorLabels)
+		if (Position.type == "glgo")
 		{
-			g_LangSelectorLabels = Object.entries(g_DeploymentValues).sort((a,b) => (a[1] < b[1]) ? -1 : (a[1] > b[1]) ? 1 : 0);
-		}
+			// Creating this
+			//
+			//  <div id="GLGOLanguageSelector" className="OneLinkNoTx GLGO-language-selector">
+			//    <div className="oljs-select-selected oljs-select-arrow-active">Select Language</div>
+			//    <div className="oljs-select-items">
+			//      <div value="ar">Arabic (United Arab Emirates)</div>
+			//      <div value="az">Azerbaijani-Cyrillic (Azerbaijan)</div>
+			//      <div class="oljs-same-as-selected" value="oljs_default">English (United States)</div>
+			//      <div value="cd">French (Democratic Republic of the Congo)</div>
+			//    </div>
+			//  </div>
 
-		for (let i=0; i < g_LangSelectorLabels.length; i++)
-		{
-			let LangValue  = g_LangSelectorLabels[i];
-			let sLangValue = LangValue[0];
-			let sLangName  = LangValue[1];
+			let oGLGODiv = document.createElement("div");
 
-			let oOption = document.createElement("option");
+			oGLGODiv.id        = "GLGOLanguageSelector";
+			oGLGODiv.className = "OneLinkNoTx GLGO-language-selector";
 
-			oOption.value = sLangValue;
-			oOption.innerHTML = sLangName;
-			oSelect.appendChild(oOption);
+			let oSelectedDiv = document.createElement("div");
+			oSelectedDiv.className = "oljs-select-selected";
 
-			if (((sCurrentLang != "") && (sLangValue == sCurrentLang)) ||
-				((sCurrentLang == "") && (sLangValue == "oljs_default")))
+			oSelectedDiv.addEventListener("click", function(e) {
+				/*when the select box is clicked, close any other select boxes, and open/close the current select box:*/
+				e.stopPropagation();
+				CloseLangSelector(this);
+				this.nextSibling.classList.toggle("oljs-select-hide");
+				this.classList.toggle("oljs-select-arrow-active");
+			});
+
+			let oLangsDiv  = document.createElement("div");
+			oLangsDiv.className = "oljs-select-items oljs-select-hide";
+
+			oGLGODiv.appendChild(oSelectedDiv);
+			oGLGODiv.appendChild(oLangsDiv);
+
+			let bSelectedOption = false;
+			let bDefaultExists  = false;
+
+			if (!g_LangSelectorLabels)
 			{
-				oSelect.value   = sLangValue;
-				bSelectedOption = true;
+				g_LangSelectorLabels = Object.entries(g_DeploymentValues).sort((a,b) => (a[1] < b[1]) ? -1 : (a[1] > b[1]) ? 1 : 0);
 			}
 
-			if (sLangValue == "oljs_default")
+			let sDefaultLang = "";
+			for (let i=0; i < g_LangSelectorLabels.length; i++)
 			{
-				bDefaultExists = true;
+				let LangValue  = g_LangSelectorLabels[i];
+				let sLangValue = LangValue[0];
+				let sLangName  = LangValue[1];
+
+				let oLangDiv   = document.createElement("div");
+
+				oLangDiv.value     = sLangValue;
+				oLangDiv.innerHTML = sLangName;
+				oLangsDiv.appendChild(oLangDiv);
+
+				if (((sCurrentLang != "") && (sLangValue == sCurrentLang)) ||
+					((sCurrentLang == "") && (sLangValue == "oljs_default")))
+				{
+					oLangDiv.className = "oljs-same-as-selected";
+					oSelectedDiv.innerHTML = sLangName;
+					bSelectedOption = true;
+				}
+
+				if (sLangValue == "oljs_default")
+				{
+					bDefaultExists = true;
+					sDefaultLang = sLangName;
+				}
+
+				oLangDiv.addEventListener("click", function(e) {
+					let y = this.parentNode.getElementsByClassName("same-as-selected");
+					for (let k = 0; k < y.length; k++) {
+						y[k].removeAttribute("class");
+					}
+					this.setAttribute("class", "same-as-selected");
+
+					OneLinkMoxieJS.LangSelected(this.value);
+				});
 			}
+
+			if (!bSelectedOption && bDefaultExists)
+			{
+				oSelectedDiv.innerHTML = sDefaultLang;
+				// TODO: find "oljs_default" in the div list and: oLangDiv.className = "oljs-same-as-selected";
+			}
+
+			if (Position.pos == "first")
+			{
+				let oSibling = obj.firstChild;
+
+				obj.insertBefore(oGLGODiv, oSibling);
+			}
+			else // "last"
+			{
+				obj.appendChild(oGLGODiv);
+			}
+
+			document.addEventListener("click", CloseLangSelector);
 		}
-
-		if (!bSelectedOption && bDefaultExists)
+		else
 		{
-			oSelect.value = "oljs_default";
-		}
+			let oSelect = document.createElement("select");
 
-		oSelect.onchange = function() {OneLinkMoxieJS.LangSelected();};
+			oSelect.id        = "OLJSLanguageSelector";
+			oSelect.className = "OneLinkNoTx OLJS-language-selector";
 
-		if (sPosition == "first")
-		{
-			let oSibling = obj.firstChild;
+			let bSelectedOption = false;
+			let bDefaultExists  = false;
 
-			obj.insertBefore(oSelect, oSibling);
-		}
-		else // "last"
-		{
-			obj.appendChild(oSelect);
+			if (!g_LangSelectorLabels)
+			{
+				g_LangSelectorLabels = Object.entries(g_DeploymentValues).sort((a,b) => (a[1] < b[1]) ? -1 : (a[1] > b[1]) ? 1 : 0);
+			}
+
+			for (let i=0; i < g_LangSelectorLabels.length; i++)
+			{
+				let LangValue  = g_LangSelectorLabels[i];
+				let sLangValue = LangValue[0];
+				let sLangName  = LangValue[1];
+
+				let oOption = document.createElement("option");
+
+				oOption.value = sLangValue;
+				oOption.innerHTML = sLangName;
+				oSelect.appendChild(oOption);
+
+				if (((sCurrentLang != "") && (sLangValue == sCurrentLang)) ||
+					((sCurrentLang == "") && (sLangValue == "oljs_default")))
+				{
+					oSelect.value   = sLangValue;
+					bSelectedOption = true;
+				}
+
+				if (sLangValue == "oljs_default")
+				{
+					bDefaultExists = true;
+				}
+			}
+
+			if (!bSelectedOption && bDefaultExists)
+			{
+				oSelect.value = "oljs_default";
+			}
+
+			oSelect.onchange = function() {OneLinkMoxieJS.LangSelected();};
+
+			if (Position.pos == "first")
+			{
+				let oSibling = obj.firstChild;
+
+				obj.insertBefore(oSelect, oSibling);
+			}
+			else // "last"
+			{
+				obj.appendChild(oSelect);
+			}
 		}
 	}
 } // InsertLangSelector
+
+//-----------------------------------------------------------------------------
+function CloseLangSelector(obj)
+//-----------------------------------------------------------------------------
+{
+	// close the lang selector div box
+
+	let oLangDivs = document.getElementsByClassName("oljs-select-items");
+	let oSelectedDiv = document.getElementsByClassName("oljs-select-selected");
+
+	let arrNo = [];
+
+	for (let i = 0; i < oSelectedDiv.length; i++)
+	{
+		if (obj == oSelectedDiv[i])
+		{
+			arrNo.push(i)
+		}
+		else
+		{
+			oSelectedDiv[i].classList.remove("oljs-select-arrow-active");
+		}
+	}
+	for (let i = 0; i < oLangDivs.length; i++)
+	{
+		if (arrNo.indexOf(i))
+		{
+			oLangDivs[i].classList.add("oljs-select-hide");
+		}
+	}
+} // CloseLangSelector
 
 //-----------------------------------------------------------------------------
 function CreateLangSelector(iNumTimes)
@@ -19147,6 +20224,12 @@ function CreateLangSelector(iNumTimes)
 		{
 			oExistingSelector.parentNode.removeChild(oExistingSelector);
 		}
+
+		let oExistingGLGOSelector = document.getElementById("GLGOLanguageSelector");
+		if (oExistingGLGOSelector)
+		{
+			oExistingGLGOSelector.parentNode.removeChild(oExistingSelector);
+		}
 	} catch (e)
 	{
 	}
@@ -19158,7 +20241,7 @@ function CreateLangSelector(iNumTimes)
 
 		if (obj)
 		{
-			InsertLangSelector(obj, Position.pos);
+			InsertLangSelector(obj, Position);
 		} else
 		{
 			iNumTimes--;
@@ -19302,6 +20385,13 @@ function MoxieSetTranslationMethod(sTxMethod)
 } // MoxieSetTranslationMethod
 
 //-----------------------------------------------------------------------------
+function SetPretranslateMode(sPretranslateMode)
+//-----------------------------------------------------------------------------
+{
+	g_sPretranslateMode = sPretranslateMode;
+} // SetPretranslateMode
+
+//-----------------------------------------------------------------------------
 function SetDeploymentMethod(sDeploymentMethod)
 //-----------------------------------------------------------------------------
 {
@@ -19328,6 +20418,13 @@ function MoxieSetEnableAMI(bEnableAMI)
 {
 	g_bEnableAMI = bEnableAMI;
 } // MoxieSetEnableAMI
+
+//-----------------------------------------------------------------------------
+function ForceAMI(bForceAMI)
+//-----------------------------------------------------------------------------
+{
+	g_bForceAMI = bForceAMI;
+} // ForceAMI
 
 //-----------------------------------------------------------------------------
 function MoxieSetIsMultiDomain(bIsMultiDomain)
@@ -19366,13 +20463,6 @@ function SetSkeletonVersion(sSkeletonVersion)
 {
 	g_sSkeletonVersion = sSkeletonVersion;
 } // SetSkeletonVersion
-
-//-----------------------------------------------------------------------------
-function GetQAStats()
-//-----------------------------------------------------------------------------
-{
-	return g_QAStats;
-} // GetQAStats
 
 //-----------------------------------------------------------------------------
 function ClearMoxieTx(obj)
@@ -19437,6 +20527,31 @@ function ClearTranslatedText()
 
 } // ClearTranslatedText
 
+//-----------------------------------------------------------------------------
+function VersionCompare(sVersion)
+//-----------------------------------------------------------------------------
+{
+	if (typeof sVersion !== 'string')
+	{
+		sVersion = String(sVersion);
+	}
+
+	let Version          = sVersion.split('.');
+	let ThisMoxieVersion = g_MoxieVersion.split('.');
+
+	const iLen = Math.min(Version.length, ThisMoxieVersion.length);
+
+	for (let i = 0; i < iLen; ++ i)
+	{
+		Version[i]          = parseInt(Version[i], 10);
+		ThisMoxieVersion[i] = parseInt(ThisMoxieVersion[i], 10);
+
+		if (ThisMoxieVersion[i] > Version[i]) return 1;
+		if (ThisMoxieVersion[i] < Version[i]) return -1;
+	}
+	return (Version.length == ThisMoxieVersion.length) ? 0: (ThisMoxieVersion.length > Version.length ? 1 : -1);
+} // VersionCompare
+
 return {
 	MoxieTranslate            : MoxieTranslate,
 	MoxieSetupTranslateRules  : MoxieSetupTranslateRules,
@@ -19463,7 +20578,9 @@ return {
 	MoxieSetTranslationArray  : MoxieSetTranslationArray,
 	MoxieSetAssetArray        : MoxieSetAssetArray,
 	MoxieSetTranslationMethod : MoxieSetTranslationMethod,
+	SetPretranslateMode       : SetPretranslateMode,
 	MoxieSetEnableAMI         : MoxieSetEnableAMI,
+	ForceAMI                  : ForceAMI,
 	MoxieApiStatsPush         : MoxieApiStatsPush,
 	MoxieReverseWalkDOM       : MoxieReverseWalkDOM,
 	SetDeploymentMethod       : SetDeploymentMethod,
@@ -19471,12 +20588,13 @@ return {
 	SetDeploymentValues       : SetDeploymentValues,
 	SetSkeletonVersion        : SetSkeletonVersion,
 	SetTranslateCallback      : SetTranslateCallback,
+	TextToJliff               : TextToJliff,
 	EnableImages              : EnableImages,
 	LangSelected              : LangSelected,
 	IsPageInScope             : IsPageInScope,
 	GetOneLinkTxState         : GetOneLinkTxState,
-	GetQAStats                : GetQAStats,
 	ClearTranslatedText       : ClearTranslatedText,
+	VersionCompare            : VersionCompare,
 	GetPath                   : GetPath,
 	GetPathForHash            : GetPathForHash,
 	IsNonText                 : IsNonText,
@@ -19490,8 +20608,7 @@ return {
 	g_OPEAssetArray           : g_OPEAssetArray
 };
 
-})();   
-
+})(); 
 //  .----------------.  .----------------.  .----------------.  .----------------.  .----------------.
 // | .--------------. || .--------------. || .--------------. || .--------------. || .--------------. |
 // | | ____    ____ | || |     ____     | || |  ____  ____  | || |     _____    | || |  _________   | |
@@ -19841,6 +20958,7 @@ function ProcessPretrans(sXapisHost, oConfigInfo)
 	}
 	
 	let sPretransMode = oConfigData.pretrans_mode;
+	OneLinkMoxieJS.SetPretranslateMode(sPretransMode);
 	if (sPretransMode == "off")
 	{
 		ApplyCustomJsCss(sCustomCssHex, sCustomJsHex);
@@ -19871,16 +20989,10 @@ function ProcessPretrans(sXapisHost, oConfigInfo)
 					let oJsonResponse     = JSON.parse(oXHR.responseText);
 					let oTranslationArray = oJsonResponse.targets;
 					let oTransAssetsArray = oJsonResponse.assets;
-					if (oTranslationArray)
-					{
-						OneLinkMoxieJS.MoxieSetTranslationArray(oTranslationArray);
-						OneLinkMoxieJS.MoxieSetAssetArray(oTransAssetsArray);
-					}
-					else
-					{
-						// backwards compatibility with older xapis versions (can be removed later)
-						OneLinkMoxieJS.MoxieSetTranslationArray(oJsonResponse);
-					}
+
+					OneLinkMoxieJS.MoxieSetTranslationArray(oTranslationArray);
+					OneLinkMoxieJS.MoxieSetAssetArray(oTransAssetsArray);
+
 					try
 					{
 						var nTime = (window.performance.now() - nKjaxStart) * 1000;
@@ -19917,6 +21029,7 @@ function ProcessPretrans(sXapisHost, oConfigInfo)
 				}
 				catch (e)
 				{
+					console.warn("Error reading Pretranslate JSON:", e)
 					MoxieStart(sXapisHost, sTranslationKey);
 				}
 			},
